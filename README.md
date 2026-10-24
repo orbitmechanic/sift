@@ -1,5 +1,7 @@
 # Sift
 
+**Live:** https://orbitmechanic.github.io/sift/
+
 A private, ad-free image board. Search openly licensed images, save only their links, and grow a feed from the things you chose.
 
 Sift is a static site: HTML, CSS, and vanilla JavaScript with no build step, no framework, and no backend.
