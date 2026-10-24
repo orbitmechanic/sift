@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sift — a private image board</title>
+  <meta name="description" content="Sift is a private, ad-free image board. Search open images, save only the links, and grow a feed that belongs to you.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Sift — a private image board">
+  <meta property="og:description" content="Search open images, save only the links, and grow a feed that belongs to you.">
+  <meta name="twitter:card" content="summary">
+  <meta name="theme-color" content="#f2eee4">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src https://api.openverse.org https://commons.wikimedia.org; base-uri 'self'; form-action 'self'; object-src 'none'">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="preload" href="assets/fonts/fraunces-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/fonts/instrument-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#view">Skip to content</a>
+  <div class="grain" aria-hidden="true"></div>
+
+  <svg class="svg-sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h11M4 17h16"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 15.2A8.5 8.5 0 0 1 8.8 4a8.5 8.5 0 1 0 11.2 11.2Z"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 20h16"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="m4 20 4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Z"/><path d="m13.5 8.5 3 3"/></symbol>
+    <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6 4h12v17l-6-4-6 4V4Z"/></symbol>
+    <symbol id="i-bookmark-filled" viewBox="0 0 24 24"><path d="M6 4h12v17l-6-4-6 4V4Z" fill="currentColor"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M4 12h16M14 6l6 6-6 6"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+    <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M3 7h3c5 0 7 10 12 10h3M18 4l3 3-3 3M3 17h3c1.5 0 2.7-.9 3.8-2.2M14.2 9.2C15.3 7.9 16.5 7 18 7h3M18 14l3 3-3 3"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1"/><path d="M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.1-1.1"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3V6Z"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></symbol>
+    <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5 5-2Z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4.5 4.5L19 7"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m21 15-5-5L4 20"/></symbol>
+  </svg>
+
+  <header class="topbar">
+    <button class="icon-btn menu-btn" id="menuBtn" type="button" aria-label="Open boards" aria-controls="sidebar" aria-expanded="false">
+      <svg class="icon" aria-hidden="true"><use href="#i-menu"/></svg>
+    </button>
+
+    <a class="brand" href="#" data-nav="home" aria-label="Sift, home">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <path d="M16 2.5v27M2.5 16h27M6.5 6.5l19 19M25.5 6.5l-19 19"/>
+        <circle cx="16" cy="16" r="3.1"/>
+      </svg>
+      <span class="brand-word">sift</span>
+      <span class="brand-tag">private image board</span>
+    </a>
+
+    <form class="search" id="searchForm" role="search" autocomplete="off">
+      <svg class="icon search-icon" aria-hidden="true"><use href="#i-search"/></svg>
+      <label class="sr-only" for="searchInput">Search for images</label>
+      <input id="searchInput" name="q" type="search" placeholder="Search the open web for images" autocomplete="off" spellcheck="false">
+      <kbd aria-hidden="true">/</kbd>
+      <button class="search-submit" type="submit">Search</button>
+    </form>
+
+    <div class="top-actions">
+      <button class="privacy-pill" id="privacyBtn" type="button" title="How Sift protects your privacy">
+        <svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>
+        <span>Local only</span>
+      </button>
+      <button class="icon-btn theme-btn" id="themeBtn" type="button" aria-label="Switch to dusk theme" title="Switch theme">
+        <svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg>
+      </button>
+      <button class="icon-btn" id="settingsBtn" type="button" aria-label="Settings" title="Settings">
+        <svg class="icon" aria-hidden="true"><use href="#i-gear"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="shell">
+    <aside class="sidebar" id="sidebar" aria-label="Boards">
+      <button class="icon-btn sidebar-close" id="sidebarClose" type="button" aria-label="Close boards">
+        <svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>
+      </button>
+      <div class="sidebar-scroll">
+        <nav class="side-nav">
+          <p class="eyebrow">Your archive</p>
+          <button class="nav-item" type="button" data-nav="home">
+            <svg class="icon" aria-hidden="true"><use href="#i-compass"/></svg>
+            <span>The field</span>
+            <span class="nav-count" id="feedCount" aria-hidden="true"></span>
+          </button>
+          <button class="nav-item" type="button" data-nav="all">
+            <svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg>
+            <span>All saved</span>
+            <span class="nav-count" id="allCount" aria-hidden="true">0</span>
+          </button>
+
+          <div class="side-heading">
+            <span>Boards</span>
+            <button class="mini-btn" id="newBoardBtn" type="button" aria-label="New board" title="New board">
+              <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>
+            </button>
+          </div>
+          <ul class="board-list" id="boardList"></ul>
+          <button class="new-board-link" id="newBoardLink" type="button">
+            <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>
+            New board
+          </button>
+        </nav>
+
+        <div class="sidebar-note">
+          <span class="note-pin" aria-hidden="true"></span>
+          <p><strong>Nothing leaves this browser.</strong> Boards are links, saved locally. No account, no tracking, no ads.</p>
+        </div>
+      </div>
+
+      <div class="sidebar-foot">
+        <button type="button" data-action="export"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Export JSON</button>
+        <button type="button" data-action="import"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Import</button>
+        <button type="button" data-action="privacy"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>Privacy</button>
+      </div>
+    </aside>
+
+    <div class="scrim" id="scrim" hidden></div>
+    <main class="view" id="view" tabindex="-1"></main>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden>
+    <span id="toastMessage"></span>
+    <button type="button" id="toastAction" hidden></button>
+  </div>
+
+  <dialog class="dialog save-dialog" id="saveDialog" aria-labelledby="saveTitle">
+    <div class="dialog-inner">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">Keep this</p>
+          <h2 id="saveTitle">Save to a board</h2>
+        </div>
+        <button class="icon-btn dialog-close" type="button" data-close aria-label="Close">
+          <svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>
+        </button>
+      </div>
+      <div class="save-preview" id="savePreview"></div>
+      <div class="save-boards" id="saveBoards"></div>
+      <button class="ghost-action" id="saveNewBoard" type="button">
+        <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>
+        New board
+      </button>
+    </div>
+  </dialog>
+
+  <dialog class="dialog board-dialog" id="boardDialog" aria-labelledby="boardDialogTitle">
+    <form class="dialog-inner" id="boardForm">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow" id="boardDialogEyebrow">A new collection</p>
+          <h2 id="boardDialogTitle">New board</h2>
+        </div>
+        <button class="icon-btn dialog-close" type="button" data-close aria-label="Close">
+          <svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>
+        </button>
+      </div>
+      <label class="field">
+        <span>Board name</span>
+        <input id="boardNameInput" name="name" type="text" maxlength="80" required placeholder="Moss, fog, and quiet rooms">
+      </label>
+      <label class="field" id="boardSeedField">
+        <span>Starting seed <em>optional</em></span>
+        <input id="boardSeedInput" name="seed" type="text" maxlength="160" placeholder="e.g. mossy forest">
+      </label>
+      <p class="field-hint">The seed is kept locally and used to suggest related images. You can leave it blank.</p>
+      <div class="dialog-actions">
+        <button class="btn btn-quiet" type="button" data-close>Cancel</button>
+        <button class="btn btn-primary" type="submit" id="boardSubmit">Create board</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="dialog link-dialog" id="linkDialog" aria-labelledby="linkDialogTitle">
+    <form class="dialog-inner" id="linkForm">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">By hand</p>
+          <h2 id="linkDialogTitle">Add an image link</h2>
+        </div>
+        <button class="icon-btn dialog-close" type="button" data-close aria-label="Close">
+          <svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>
+        </button>
+      </div>
+      <label class="field">
+        <span>Direct image URL</span>
+        <input id="linkUrlInput" name="url" type="url" required placeholder="https://images.example.com/photo.jpg">
+      </label>
+      <label class="field">
+        <span>Title <em>optional</em></span>
+        <input id="linkTitleInput" name="title" type="text" maxlength="200" placeholder="A quiet corner">
+      </label>
+      <p class="field-hint">Sift stores the URL only. The image stays on its original host.</p>
+      <div class="dialog-actions">
+        <button class="btn btn-quiet" type="button" data-close>Cancel</button>
+        <button class="btn btn-primary" type="submit">Add to board</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="dialog detail-dialog" id="detailDialog" aria-labelledby="detailTitle">
+    <div class="dialog-inner detail-inner" id="detailInner"></div>
+  </dialog>
+
+  <dialog class="dialog prose-dialog" id="privacyDialog" aria-labelledby="privacyTitle">
+    <div class="dialog-inner">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">The fine print, in plain words</p>
+          <h2 id="privacyTitle">Private by architecture</h2>
+        </div>
+        <button class="icon-btn dialog-close" type="button" data-close aria-label="Close">
+          <svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>
+        </button>
+      </div>
+      <div class="prose">
+        <p class="lede">Sift has no account system, no analytics, no cookies, and no server of its own. There is nothing to monetize, so there are no ads to serve.</p>
+        <ul class="privacy-list">
+          <li><strong>Your boards live here.</strong> Names, image links, and a little metadata are stored in this browser's <code>localStorage</code>. No image files are downloaded into your archive, and no data is sent to us.</li>
+          <li><strong>Searches go straight to the source.</strong> Your query is sent directly from your browser to Openverse, with Wikimedia Commons as a fallback. Openverse is run by WordPress; their privacy policy applies to those requests.</li>
+          <li><strong>No search history is stored.</strong> Sift keeps the current search in memory only. Reload the page and it is gone.</li>
+          <li><strong>Image hosts see image requests.</strong> This page uses <code>no-referrer</code>, so hosts do not receive the page you came from, but they can still see your IP address when an image loads.</li>
+          <li><strong>You own the escape hatch.</strong> Export your boards as JSON at any time. Clearing this site's browser storage removes them permanently.</li>
+        </ul>
+        <p class="prose-foot">Openverse and Wikimedia Commons return openly licensed images. Check the license on each original source before reusing an image.</p>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn btn-primary" type="button" data-close>Understood</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="dialog prose-dialog" id="settingsDialog" aria-labelledby="settingsTitle">
+    <div class="dialog-inner">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">This browser</p>
+          <h2 id="settingsTitle">Settings</h2>
+        </div>
+        <button class="icon-btn dialog-close" type="button" data-close aria-label="Close">
+          <svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>
+        </button>
+      </div>
+
+      <section class="settings-block">
+        <h3>Appearance</h3>
+        <div class="segmented" id="themeSegmented" role="group" aria-label="Theme">
+          <button type="button" data-theme-choice="auto">Auto</button>
+          <button type="button" data-theme-choice="light">Day</button>
+          <button type="button" data-theme-choice="dusk">Dusk</button>
+        </div>
+      </section>
+
+      <section class="settings-block">
+        <h3>Your data</h3>
+        <p class="settings-copy" id="storageSummary">Boards and links are stored only in this browser.</p>
+        <div class="settings-actions">
+          <button class="btn btn-quiet" type="button" data-action="export"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Export JSON</button>
+          <button class="btn btn-quiet" type="button" data-action="import"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Import</button>
+          <button class="btn btn-danger" type="button" data-action="erase"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>Erase everything</button>
+        </div>
+      </section>
+
+      <section class="settings-block">
+        <h3>Image sources</h3>
+        <p class="settings-copy">Search is powered by <a href="https://openverse.org" target="_blank" rel="noopener noreferrer">Openverse</a>, with <a href="https://commons.wikimedia.org" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a> as a fallback. Sift is a static page; there is no backend.</p>
+        <p class="settings-copy fine">Sift v1.0 · No analytics, ever.</p>
+      </section>
+    </div>
+  </dialog>
+
+  <input type="file" id="importFile" accept="application/json,.json" hidden>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
