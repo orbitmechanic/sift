@@ -127,6 +127,7 @@
       <div class="sidebar-foot">
         <button type="button" data-action="export"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Export JSON</button>
         <button type="button" data-action="import"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Import</button>
+        <button type="button" data-action="pinterest"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg>Pinterest</button>
         <button type="button" data-action="privacy"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>Privacy</button>
       </div>
     </aside>
@@ -214,6 +215,78 @@
     </form>
   </dialog>
 
+  <dialog class="dialog pinterest-dialog" id="pinterestDialog" aria-labelledby="pinterestTitle">
+    <div class="dialog-inner">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">A door from Pinterest</p>
+          <h2 id="pinterestTitle">Bring your boards over</h2>
+        </div>
+        <button class="icon-btn dialog-close" type="button" data-close aria-label="Close">
+          <svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>
+        </button>
+      </div>
+
+      <p class="lede pinterest-lede">Sift cannot read Pinterest directly, so a small bookmarklet does the reading inside your Pinterest tab and hands the boards to Sift. Your Pinterest password never touches Sift.</p>
+
+      <div class="pinterest-steps">
+        <section class="pinterest-step">
+          <span class="pinterest-step-num">1</span>
+          <div class="pinterest-step-body">
+            <h3>Name the account</h3>
+            <label class="field">
+              <span>Pinterest username</span>
+              <input id="pinterestUsername" type="text" maxlength="80" autocomplete="off" spellcheck="false" placeholder="e.g. orbitmechanic">
+            </label>
+            <p class="field-hint" id="pinterestUsernameHint">Use the name in <code>pinterest.com/name/</code>.</p>
+          </div>
+        </section>
+
+        <section class="pinterest-step">
+          <span class="pinterest-step-num">2</span>
+          <div class="pinterest-step-body">
+            <h3>Install the importer</h3>
+            <p>Drag this button to your bookmarks bar.</p>
+            <div class="pinterest-bookmark-row">
+              <a class="btn btn-primary bookmarklet-link" id="pinterestBookmarklet" href="#" draggable="true" aria-disabled="true">Sift Pinterest Importer</a>
+              <button class="btn btn-quiet" type="button" data-action="pinterest-copy">Copy</button>
+            </div>
+            <p class="field-hint">If the bar is hidden, press Ctrl+Shift+B on Windows or ⌘+Shift+B on a Mac.</p>
+          </div>
+        </section>
+
+        <section class="pinterest-step">
+          <span class="pinterest-step-num">3</span>
+          <div class="pinterest-step-body">
+            <h3>Run it on Pinterest</h3>
+            <p>Open Pinterest, sign in for private boards and the fullest public feeds, then click the importer in your bookmarks bar. Sift opens with a preview before anything is saved.</p>
+            <button class="btn btn-quiet" type="button" data-action="pinterest-open">
+              <svg class="icon" aria-hidden="true"><use href="#i-external"/></svg>
+              Open Pinterest
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <p class="pinterest-note">Private boards appear only when the username belongs to the account signed in to Pinterest in this browser. Pinterest may limit anonymous sessions to a preview of each board. Imports merge into boards with the same name, and duplicate links are skipped.</p>
+    </div>
+  </dialog>
+
+  <dialog class="dialog pinterest-dialog" id="pinterestReceiveDialog" aria-labelledby="pinterestReceiveTitle">
+    <div class="dialog-inner">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">From Pinterest</p>
+          <h2 id="pinterestReceiveTitle">Receiving boards</h2>
+        </div>
+        <button class="icon-btn dialog-close" type="button" data-close aria-label="Close">
+          <svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>
+        </button>
+      </div>
+      <div id="pinterestReceiveBody"></div>
+    </div>
+  </dialog>
+
   <dialog class="dialog detail-dialog" id="detailDialog" aria-labelledby="detailTitle">
     <div class="dialog-inner detail-inner" id="detailInner"></div>
   </dialog>
@@ -236,6 +309,7 @@
           <li><strong>Searches go straight to the source.</strong> Your query is sent directly from your browser to Openverse, with Wikimedia Commons as a fallback. Openverse is run by WordPress; their privacy policy applies to those requests.</li>
           <li><strong>No search history is stored.</strong> Sift keeps the current search in memory only. Reload the page and it is gone.</li>
           <li><strong>Image hosts see image requests.</strong> This page uses <code>no-referrer</code>, so hosts do not receive the page you came from, but they can still see your IP address when an image loads.</li>
+          <li><strong>Pinterest import stays in your browser.</strong> The optional importer is a bookmarklet that runs inside your Pinterest tab, reads the boards your browser session can see, and passes them directly to Sift. Pinterest credentials are never shared with Sift, and nothing passes through a third-party server.</li>
           <li><strong>You own the escape hatch.</strong> Export your boards as JSON at any time. Clearing this site's browser storage removes them permanently.</li>
         </ul>
         <p class="prose-foot">Openverse and Wikimedia Commons return openly licensed images. Check the license on each original source before reusing an image.</p>
@@ -273,6 +347,7 @@
         <div class="settings-actions">
           <button class="btn btn-quiet" type="button" data-action="export"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Export JSON</button>
           <button class="btn btn-quiet" type="button" data-action="import"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Import</button>
+          <button class="btn btn-quiet" type="button" data-action="pinterest"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg>Pinterest import</button>
           <button class="btn btn-danger" type="button" data-action="erase"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>Erase everything</button>
         </div>
       </section>
@@ -280,7 +355,7 @@
       <section class="settings-block">
         <h3>Image sources</h3>
         <p class="settings-copy">Search is powered by <a href="https://openverse.org" target="_blank" rel="noopener noreferrer">Openverse</a>, with <a href="https://commons.wikimedia.org" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a> as a fallback. Sift is a static page; there is no backend.</p>
-        <p class="settings-copy fine">Sift v1.0 · No analytics, ever.</p>
+        <p class="settings-copy fine">Sift v1.1 · No analytics, ever.</p>
       </section>
     </div>
   </dialog>

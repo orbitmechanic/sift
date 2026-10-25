@@ -6,7 +6,8 @@
   const VERSION = 1;
   const PAGE_SIZE = 20;
   const MAX_BOARDS = 200;
-  const MAX_PINS_PER_BOARD = 1200;
+  const MAX_PINS_PER_BOARD = 5000;
+  const PINTEREST_PIN_CAP = 5000;
   const MAX_SEEDS = 14;
   const FEED_LIMIT = 56;
   const API_BASE = "https://api.openverse.org/v1";
@@ -138,11 +139,22 @@
       source: cleanText(raw.source, 80) || "Open web",
       foreignLandingUrl: safeUrl(raw.foreignLandingUrl) || "",
       openverseId: cleanText(raw.openverseId, 80) || "",
-      provider: ["openverse", "wikimedia", "manual"].includes(raw.provider) ? raw.provider : "manual",
+      provider: ["openverse", "wikimedia", "pinterest", "manual"].includes(raw.provider) ? raw.provider : "manual",
       width: Number.isFinite(width) && width > 0 && width <= 50000 ? Math.round(width) : 0,
       height: Number.isFinite(height) && height > 0 && height <= 50000 ? Math.round(height) : 0,
       tags,
       savedAt: validIso(raw.savedAt, nowIso()),
+    };
+  }
+
+  function sanitizeBoardOrigin(raw) {
+    if (!raw || typeof raw !== "object" || raw.provider !== "pinterest") return null;
+    const boardId = cleanText(raw.boardId, 80);
+    if (!boardId) return null;
+    return {
+      provider: "pinterest",
+      boardId,
+      username: normalizePinterestUsername(raw.username),
     };
   }
 
@@ -187,6 +199,7 @@
           createdAt: validIso(rawBoard.createdAt, nowIso()),
           updatedAt: validIso(rawBoard.updatedAt, nowIso()),
           seeds: sanitizeSeedList(rawBoard.seeds),
+          origin: sanitizeBoardOrigin(rawBoard.origin) || undefined,
           pins,
         });
       }
@@ -214,16 +227,18 @@
     }
   }
 
-  function persist() {
+  function persist(target = state, { quiet = false } = {}) {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(target));
       storageAvailable = true;
       return true;
     } catch (error) {
       storageAvailable = false;
-      showToast("This browser would not save your changes. They will last for this tab only.", {
-        duration: 7000,
-      });
+      if (!quiet) {
+        showToast("This browser would not save your changes. They will last for this tab only.", {
+          duration: 7000,
+        });
+      }
       return false;
     }
   }
@@ -391,6 +406,7 @@
     const map = {
       wikimedia: "Wikimedia Commons",
       openverse: "Openverse",
+      pinterest: "Pinterest",
       flickr: "Flickr",
       manual: "Direct link",
     };
@@ -2061,6 +2077,746 @@
     }
   }
 
+  /* ---------------------------------------------------------------------
+     Pinterest import — a bookmarklet reads Pinterest, Sift previews it
+     --------------------------------------------------------------------- */
+
+  let pinterestTransfer = null;
+
+  function normalizePinterestUsername(value) {
+    let raw = String(value ?? "").trim();
+    if (!raw) return "";
+    const urlMatch = raw.match(/pinterest\.[a-z.]+\/([^/?#\s]+)/i);
+    if (urlMatch) raw = urlMatch[1];
+    raw = raw.replace(/^@+/, "").replace(/\/+$/, "").trim();
+    return /^[a-z0-9_]{1,64}$/i.test(raw) ? raw : "";
+  }
+
+  function isPinterestOrigin(origin) {
+    try {
+      const host = new URL(origin).hostname.toLowerCase();
+      return host === "pinterest.com" || host.endsWith(".pinterest.com");
+    } catch {
+      return false;
+    }
+  }
+
+  function pinterestScraper(config) {
+    (async () => {
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const text = (value, max = 300) =>
+        String(value ?? "")
+          .replace(/[\u0000-\u001f\u007f]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, max);
+      const imageUrl = (value) => {
+        let raw = String(value ?? "").replace(/\\u002F/gi, "/");
+        raw = raw.replace(/^\/\//, "https://").replace(/^http:\/\//i, "https://");
+        return /^https:\/\/i\.pinimg\.com\//i.test(raw) ? raw : "";
+      };
+      const pinUrl = (id) => {
+        const digits = String(id ?? "").replace(/\D/g, "");
+        return digits ? `https://www.pinterest.com/pin/${digits}/` : "";
+      };
+      const boardPath = (board) => {
+        const raw = String(board.url ?? "");
+        if (/^https?:\/\//i.test(raw)) {
+          try {
+            return new URL(raw).pathname;
+          } catch {
+            return `/${config.username}/${board.id}/`;
+          }
+        }
+        if (raw.startsWith("/")) return raw;
+        return `/${config.username}/${board.id}/`;
+      };
+      const endpoint = (path, sourceUrl, options) => {
+        const url = new URL(path, location.origin);
+        url.searchParams.set("source_url", sourceUrl);
+        url.searchParams.set("data", JSON.stringify({ options, context: {} }));
+        url.searchParams.set("_", String(Date.now()));
+        return url.href;
+      };
+      const fetchResource = async (path, sourceUrl, options) => {
+        const response = await fetch(endpoint(path, sourceUrl, options), {
+          credentials: "include",
+          headers: {
+            "X-Pinterest-PWS-Handler": "www/[username].js",
+            Accept: "application/json",
+          },
+        });
+        if (!response.ok) {
+          throw new Error(`Pinterest returned ${response.status}.`);
+        }
+        const json = await response.json();
+        if (json?.resource_response?.error) {
+          throw new Error(text(json.resource_response.error, 180) || "Pinterest refused the request.");
+        }
+        return json?.resource_response || {};
+      };
+      const mapPin = (raw, board) => {
+        if (!raw || typeof raw !== "object") return null;
+        if (raw.type && raw.type !== "pin") return null;
+        const images = raw.images && typeof raw.images === "object" ? raw.images : {};
+        const pick = (...keys) => {
+          for (const key of keys) {
+            const image = images[key];
+            if (!image || !image.url) continue;
+            const url = imageUrl(image.url);
+            if (url) {
+              return {
+                url,
+                width: Number(image.width) || 0,
+                height: Number(image.height) || 0,
+              };
+            }
+          }
+          return null;
+        };
+        let full = pick("orig", "originals", "736x", "564x", "474x", "236x");
+        if (!full && raw.image) {
+          const url = imageUrl(raw.image);
+          if (url) full = { url, width: 0, height: 0 };
+        }
+        if (!full) return null;
+        const thumb = pick("736x", "564x", "474x", "236x") || full;
+        const pinner = raw.pinner && typeof raw.pinner === "object" ? raw.pinner : {};
+        const creator = text(pinner.username, 60)
+          ? `@${text(pinner.username, 60)}`
+          : text(pinner.full_name, 100) || "Pinterest";
+        const title =
+          text(raw.title || raw.grid_title || raw.description || raw.alt_text, 240) ||
+          `${text(board.name, 60) || "Pinterest"} pin`;
+        return {
+          url: full.url,
+          thumb: thumb.url,
+          title,
+          creator,
+          license: "Pinterest",
+          source: "Pinterest",
+          provider: "pinterest",
+          foreignLandingUrl: pinUrl(raw.id),
+          openverseId: "",
+          width: full.width,
+          height: full.height,
+          tags: [],
+          savedAt: new Date().toISOString(),
+        };
+      };
+
+      const siftUrl =
+        `${config.siftUrl}?pinterest-receive=${encodeURIComponent(config.token)}` +
+        `&pinterest-user=${encodeURIComponent(config.username)}`;
+      const popup = window.open(siftUrl, "_blank");
+      if (!popup) {
+        alert("Sift could not open a new tab. Allow pop-ups for Pinterest and try again.");
+        return;
+      }
+
+      const siftOrigin = config.siftOrigin || "*";
+      let ready = false;
+      let done = null;
+      let lastProgress = {
+        phase: "start",
+        text: "Reading the board list…",
+        boards: 0,
+        total: 0,
+        pins: 0,
+      };
+      const post = (type, payload) => {
+        if (!ready) return;
+        try {
+          popup.postMessage({ type, token: config.token, payload }, siftOrigin);
+        } catch {
+          /* the Sift tab may have moved on */
+        }
+      };
+      const progress = (payload) => {
+        lastProgress = payload;
+        post("sift:pinterest-progress", payload);
+      };
+      const onReady = (event) => {
+        if (event.origin !== siftOrigin) return;
+        if (!event.data || event.data.type !== "sift:pinterest-ready") return;
+        if (event.data.token !== config.token) return;
+        ready = true;
+        post("sift:pinterest-progress", lastProgress);
+        if (done) {
+          post("sift:pinterest-data", done);
+          done = null;
+          window.removeEventListener("message", onReady);
+        }
+      };
+      window.addEventListener("message", onReady);
+
+      try {
+        for (let wait = 0; wait < 40 && !ready; wait += 1) {
+          await sleep(250);
+        }
+        if (!ready) {
+          throw new Error("Sift did not answer. Allow pop-ups for Pinterest, keep the Sift tab open, and run the importer again.");
+        }
+        const username = String(config.username || "").trim();
+        const warnings = [];
+        const incomplete = [];
+        progress(lastProgress);
+        const boardOptions = {
+          page_size: 250,
+          privacy_filter: "all",
+          sort: "custom",
+          username,
+          isPrefetch: false,
+          include_archived: true,
+          field_set_key: "profile_grid_item",
+          group_by: "visibility",
+          redux_normalize_feed: true,
+        };
+        const seenBoards = new Set();
+        const boards = [];
+        const response = await fetchResource(
+          "/resource/BoardsResource/get/",
+          `/${username}/boards/`,
+          boardOptions
+        );
+        const data = Array.isArray(response.data) ? response.data : [];
+        for (const board of data) {
+          if (!board || !board.id || board.type === "story") continue;
+          const id = String(board.id);
+          if (seenBoards.has(id)) continue;
+          seenBoards.add(id);
+          boards.push(board);
+        }
+        progress({
+          phase: "boards",
+          text: `Found ${boards.length} board${boards.length === 1 ? "" : "s"}…`,
+          boards: boards.length,
+          total: boards.length,
+          pins: 0,
+        });
+        if (!boards.length) {
+          throw new Error("No boards were returned. Check the username, and sign in to Pinterest for private boards.");
+        }
+        if (response.bookmark) warnings.push("Only the first 250 boards were read.");
+        if (boards.length > (config.boardCap || 200)) warnings.push("Only the first 200 boards were imported.");
+
+        const selectedBoards = boards.slice(0, config.boardCap || 200);
+        const output = [];
+        let pinTotal = 0;
+        for (let index = 0; index < selectedBoards.length; index += 1) {
+          const board = selectedBoards[index];
+          const path = boardPath(board);
+          const pins = [];
+          let pinBookmark = "";
+          let rawPinTotal = 0;
+          let boardWarning = "";
+          for (let page = 0; page < 40; page += 1) {
+            if (pins.length >= (config.pinCap || 5000)) {
+              boardWarning = `“${text(board.name, 80) || "Board"}” was capped at ${config.pinCap || 5000} links.`;
+              break;
+            }
+            const options = { board_id: String(board.id), page_size: 250 };
+            if (pinBookmark) options.bookmarks = [pinBookmark];
+            let response;
+            try {
+              response = await fetchResource("/resource/BoardFeedResource/get/", path, options);
+            } catch (error) {
+              boardWarning = `Could not read “${text(board.name, 80) || "a board"}”: ${text(error.message, 120)}`;
+              break;
+            }
+            const data = Array.isArray(response.data) ? response.data : [];
+            rawPinTotal += data.length;
+            for (const raw of data) {
+              const pin = mapPin(raw, board);
+              if (pin) pins.push(pin);
+              if (pins.length >= (config.pinCap || 5000)) break;
+            }
+            const next = String(response.bookmark || "");
+            if (!next || next === pinBookmark || !data.length) break;
+            pinBookmark = next;
+            await sleep(110);
+          }
+          const expectedPins = Number(board.pin_count) || 0;
+          if (!boardWarning && expectedPins && rawPinTotal < expectedPins && !pinBookmark) {
+            incomplete.push({
+              name: text(board.name, 80) || "a board",
+              got: rawPinTotal,
+              total: expectedPins
+            });
+          }
+          if (boardWarning) warnings.push(boardWarning);
+          pinTotal += pins.length;
+          output.push({
+            id: String(board.id),
+            name: text(board.name, 80) || "Untitled board",
+            privacy: ["public", "private", "secret"].includes(String(board.privacy))
+              ? String(board.privacy)
+              : "public",
+            pins,
+          });
+          progress({
+            phase: "pins",
+            text: `Read ${pinTotal} link${pinTotal === 1 ? "" : "s"} from ${index + 1} of ${
+              selectedBoards.length
+            } boards…`,
+            boards: index + 1,
+            total: selectedBoards.length,
+            pins: pinTotal,
+          });
+          await sleep(140);
+        }
+
+        if (incomplete.length) {
+          const sample = incomplete
+            .slice(0, 3)
+            .map(item => `“${item.name}” (${item.got}/${item.total})`)
+            .join(", ");
+          warnings.push(
+            `Pinterest limited ${incomplete.length} board${incomplete.length === 1 ? "" : "s"}: ${sample}${
+              incomplete.length > 3 ? ` and ${incomplete.length - 3} more` : ""
+            }. Sign in to Pinterest for fuller imports.`
+          );
+        }
+        done = { username, boards: output, warnings: warnings.slice(0, 40) };
+        for (let wait = 0; wait < 20 && !ready; wait += 1) {
+          await sleep(500);
+        }
+        if (!ready) {
+          throw new Error("Sift did not answer. Close the extra tab, allow pop-ups for Pinterest, and run the importer again.");
+        }
+        post("sift:pinterest-data", done);
+        done = null;
+        window.removeEventListener("message", onReady);
+      } catch (error) {
+        post("sift:pinterest-error", { message: text(error.message, 240) || "Pinterest import failed." });
+        window.removeEventListener("message", onReady);
+        alert(text(error.message, 300) || "Pinterest import failed.");
+      }
+    })();
+  }
+
+  function pinterestBookmarkletCode(username) {
+    const config = {
+      username,
+      token: uid(),
+      siftUrl: location.origin + location.pathname,
+      siftOrigin: location.origin,
+      boardCap: MAX_BOARDS,
+      pinCap: PINTEREST_PIN_CAP,
+    };
+    return `javascript:(${pinterestScraper.toString()})(${JSON.stringify(config)});void 0`;
+  }
+
+  function updatePinterestBookmarklet() {
+    const input = $("#pinterestUsername");
+    const hint = $("#pinterestUsernameHint");
+    const link = $("#pinterestBookmarklet");
+    if (!input || !link) return;
+    const raw = input.value;
+    const username = normalizePinterestUsername(raw);
+    const secure = /^https?:$/.test(location.protocol);
+
+    if (!secure) {
+      link.removeAttribute("href");
+      link.dataset.bookmarklet = "";
+      link.setAttribute("aria-disabled", "true");
+      if (hint) hint.textContent = "The importer needs Sift served over http or https.";
+      return;
+    }
+
+    if (!username) {
+      link.removeAttribute("href");
+      link.dataset.bookmarklet = "";
+      link.setAttribute("aria-disabled", "true");
+      input.removeAttribute("aria-invalid");
+      if (hint) {
+        hint.textContent = raw.trim()
+          ? "Use letters, numbers, and underscores only."
+          : "Use the name in pinterest.com/name/.";
+      }
+      return;
+    }
+
+    const code = pinterestBookmarkletCode(username);
+    link.href = code;
+    link.dataset.bookmarklet = code;
+    link.removeAttribute("aria-disabled");
+    link.title = `Drag this to your bookmarks bar to import @${username}`;
+    input.removeAttribute("aria-invalid");
+    if (hint) hint.textContent = `Ready for @${username}. Drag the button, or use Copy.`;
+  }
+
+  function openPinterestDialog() {
+    const dialog = $("#pinterestDialog");
+    if (!dialog) return;
+    $("#settingsDialog")?.close();
+    updatePinterestBookmarklet();
+    if (!dialog.open) dialog.showModal();
+    window.setTimeout(() => $("#pinterestUsername")?.focus(), 60);
+  }
+
+  async function copyPinterestBookmarklet() {
+    const code = $("#pinterestBookmarklet")?.dataset.bookmarklet || "";
+    if (!code) {
+      showToast("Enter a valid Pinterest username first.");
+      $("#pinterestUsername")?.focus();
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(code);
+      showToast("Bookmarklet copied. Make a bookmark and paste it as the URL.");
+    } catch {
+      showToast("Copy was blocked. Drag the button to your bookmarks bar instead.");
+    }
+  }
+
+  function openPinterestProfile() {
+    const username = normalizePinterestUsername($("#pinterestUsername")?.value || "");
+    if (!username) {
+      showToast("Enter a Pinterest username first.");
+      $("#pinterestUsername")?.focus();
+      return;
+    }
+    window.open(`https://www.pinterest.com/${encodeURIComponent(username)}/`, "_blank", "noopener");
+  }
+
+  function sanitizePinterestPayload(raw, fallbackUsername = "") {
+    const source = raw && typeof raw === "object" ? raw : {};
+    const username = normalizePinterestUsername(source.username) || fallbackUsername;
+    const boards = [];
+    const rawBoards = Array.isArray(source.boards) ? source.boards.slice(0, MAX_BOARDS) : [];
+    for (const rawBoard of rawBoards) {
+      if (!rawBoard || typeof rawBoard !== "object") continue;
+      const name = cleanText(rawBoard.name, 80) || "Untitled board";
+      const id = cleanText(rawBoard.id, 80) || name.toLowerCase();
+      const privacy = ["public", "private", "secret"].includes(rawBoard.privacy)
+        ? rawBoard.privacy
+        : "public";
+      const pins = [];
+      const seenPins = new Set();
+      const rawPins = Array.isArray(rawBoard.pins) ? rawBoard.pins.slice(0, MAX_PINS_PER_BOARD) : [];
+      for (const rawPin of rawPins) {
+        const pin = sanitizePin({
+          ...rawPin,
+          provider: "pinterest",
+          source: "Pinterest",
+          license: "Pinterest",
+        });
+        if (!pin || seenPins.has(pin.url)) continue;
+        seenPins.add(pin.url);
+        pins.push(pin);
+      }
+      boards.push({ id, name, privacy, pins });
+    }
+    const warnings = Array.isArray(source.warnings)
+      ? source.warnings.map((warning) => cleanText(warning, 180)).filter(Boolean).slice(0, 12)
+      : [];
+    return { username, boards, warnings };
+  }
+
+  function pinterestProgress(payload = {}) {
+    const fill = $("#pinterestProgressFill");
+    const label = $("#pinterestProgressText");
+    const total = Number(payload.total) || 0;
+    const boards = Number(payload.boards) || 0;
+    let percent = 8;
+    if (payload.phase === "boards" && total) percent = 10 + Math.round((boards / total) * 55);
+    else if (payload.phase === "pins" && total) percent = 66 + Math.round((boards / total) * 30);
+    else if (payload.phase === "start") percent = 8;
+    if (fill) fill.style.width = `${Math.max(3, Math.min(98, percent))}%`;
+    if (label) {
+      const pins = Number(payload.pins) || 0;
+      label.textContent =
+        cleanText(payload.text, 180) ||
+        `${boards} board${boards === 1 ? "" : "s"} · ${pins} link${pins === 1 ? "" : "s"}`;
+    }
+  }
+
+  function pinterestWaiting(message = "Waiting for the Pinterest tab to send boards…") {
+    const body = $("#pinterestReceiveBody");
+    if (!body) return;
+    body.innerHTML = `
+      <div class="pinterest-waiting">
+        <p>${esc(message)}</p>
+        <div class="pinterest-progress" role="status" aria-live="polite">
+          <div class="pinterest-progress-track"><div class="pinterest-progress-fill" id="pinterestProgressFill"></div></div>
+          <p class="pinterest-progress-text" id="pinterestProgressText">Starting…</p>
+        </div>
+        <p class="field-hint">Keep this tab open. Nothing is saved until you approve the preview.</p>
+      </div>`;
+    pinterestProgress({ phase: "start", text: "Starting…" });
+  }
+
+  function pinterestPreview(data) {
+    const body = $("#pinterestReceiveBody");
+    if (!body) return;
+    if (!data.boards.length) {
+      body.innerHTML = `
+        <div class="pinterest-empty">Pinterest returned no boards for this account. Check the username, or sign in to Pinterest for private boards.</div>
+        <div class="dialog-actions"><button class="btn btn-quiet" type="button" data-close>Close</button></div>`;
+      return;
+    }
+
+    const pins = data.boards.reduce((sum, board) => sum + board.pins.length, 0);
+    const privateCount = data.boards.filter((board) => board.privacy !== "public").length;
+    const warning = data.warnings.length
+      ? `<p class="pinterest-warning">${esc(data.warnings.slice(0, 3).join(" "))}${
+          data.warnings.length > 3 ? " …" : ""
+        }</p>`
+      : "";
+    body.innerHTML = `
+      <p class="pinterest-lede">Pinterest handed over <strong>${data.boards.length}</strong> board${
+        data.boards.length === 1 ? "" : "s"
+      } and <strong>${pins}</strong> link${pins === 1 ? "" : "s"}${
+        privateCount ? `, including ${privateCount} private board${privateCount === 1 ? "" : "s"}` : ""
+      }.</p>
+      <div class="pinterest-summary">
+        <span>@${esc(data.username || "pinterest")}</span>
+        <span>${data.boards.length} boards</span>
+        <span>${pins} links</span>
+      </div>
+      ${warning}
+      <label class="pinterest-select-all">
+        <input id="pinterestSelectAll" type="checkbox" checked>
+        Select all <span id="pinterestSelectionCount"></span>
+      </label>
+      <div class="pinterest-board-list" id="pinterest-board-list">
+        ${data.boards
+          .map(
+            (board, index) => `
+          <label class="pinterest-board-row">
+            <input type="checkbox" data-pinterest-board="${index}" checked>
+            <span class="pinterest-board-name">${esc(board.name)}</span>
+            <span class="pinterest-board-meta">${board.pins.length} link${
+              board.pins.length === 1 ? "" : "s"
+            }${board.privacy !== "public" ? " · private" : ""}</span>
+          </label>`
+          )
+          .join("")}
+      </div>
+      <p class="field-hint">Boards with the same name are merged. Links already in a board are skipped.</p>
+      <p class="pinterest-error" id="pinterestImportError" hidden></p>
+      <div class="dialog-actions">
+        <button class="btn btn-quiet" type="button" data-close>Cancel</button>
+        <button class="btn btn-primary" type="button" data-action="pinterest-import">${icon(
+          "download"
+        )}Import selected</button>
+      </div>`;
+    updatePinterestSelection();
+  }
+
+  function updatePinterestSelection() {
+    const boxes = $$("[data-pinterest-board]");
+    const selected = boxes.filter((box) => box.checked);
+    const all = $("#pinterestSelectAll");
+    const count = $("#pinterestSelectionCount");
+    if (all) {
+      all.checked = boxes.length > 0 && selected.length === boxes.length;
+      all.indeterminate = selected.length > 0 && selected.length < boxes.length;
+    }
+    if (count) count.textContent = `(${selected.length} selected)`;
+  }
+
+  function setPinterestError(message) {
+    const error = $("#pinterestImportError");
+    if (!error) return;
+    error.textContent = message;
+    error.hidden = !message;
+  }
+
+  function mergePinterestBoards(username, boards) {
+    const next = JSON.parse(JSON.stringify(state));
+    let created = 0;
+    let merged = 0;
+    let added = 0;
+    let duplicates = 0;
+    let skipped = 0;
+    let skippedBoards = 0;
+
+    for (const imported of boards) {
+      let board = next.boards.find(
+        (candidate) =>
+          candidate.origin &&
+          candidate.origin.provider === "pinterest" &&
+          String(candidate.origin.boardId) === String(imported.id)
+      );
+      if (!board) {
+        board = next.boards.find(
+          (candidate) => candidate.name.toLowerCase() === imported.name.toLowerCase()
+        );
+      }
+      if (!board) {
+        if (next.boards.length >= MAX_BOARDS) {
+          skippedBoards += 1;
+          continue;
+        }
+        board = {
+          id: uid(),
+          name: imported.name,
+          createdAt: nowIso(),
+          updatedAt: nowIso(),
+          seeds: [],
+          origin: { provider: "pinterest", boardId: imported.id, username },
+          pins: [],
+        };
+        next.boards.push(board);
+        created += 1;
+      } else {
+        merged += 1;
+        if (!board.origin) {
+          board.origin = { provider: "pinterest", boardId: imported.id, username };
+        }
+      }
+
+      const seenPins = new Set(board.pins.map((pin) => pin.url));
+      for (const pin of imported.pins) {
+        if (seenPins.has(pin.url)) {
+          duplicates += 1;
+          continue;
+        }
+        if (board.pins.length >= MAX_PINS_PER_BOARD) {
+          skipped += 1;
+          continue;
+        }
+        board.pins.push(pin);
+        seenPins.add(pin.url);
+        added += 1;
+      }
+      addSeed(board, imported.name);
+      board.updatedAt = nowIso();
+    }
+
+    if (!persist(next, { quiet: true })) {
+      return { ok: false, reason: "storage" };
+    }
+
+    state = next;
+    ui.dataVersion += 1;
+    ui.feed.sig = "";
+    ui.feed.error = "";
+    renderSidebar();
+
+    return { ok: true, created, merged, added, duplicates, skipped, skippedBoards };
+  }
+
+  function importSelectedPinterest() {
+    if (!pinterestTransfer || !pinterestTransfer.data) return;
+    const data = pinterestTransfer.data;
+    const selected = $$("[data-pinterest-board]")
+      .filter((box) => box.checked)
+      .map((box) => data.boards[Number(box.dataset.pinterestBoard)])
+      .filter(Boolean);
+    if (!selected.length) {
+      setPinterestError("Choose at least one board to import.");
+      return;
+    }
+
+    const result = mergePinterestBoards(data.username, selected);
+    if (!result.ok) {
+      setPinterestError(
+        "This browser ran out of space for the import. Nothing was changed. Select fewer boards and try again."
+      );
+      return;
+    }
+
+    $("#pinterestReceiveDialog")?.close();
+    go({ name: "home" });
+    const bits = [];
+    if (result.added) bits.push(`${result.added} link${result.added === 1 ? "" : "s"}`);
+    if (result.created) bits.push(`${result.created} new board${result.created === 1 ? "" : "s"}`);
+    if (!result.added && !result.created) {
+      showToast("Those Pinterest boards are already up to date.");
+      return;
+    }
+    let message = `Imported ${bits.join(" and ")} from @${data.username || "Pinterest"}.`;
+    if (result.skipped) message += ` ${result.skipped} links hit the board limit.`;
+    if (result.skippedBoards) message += ` ${result.skippedBoards} boards hit the board limit.`;
+    showToast(message, { duration: 8000 });
+  }
+
+  function initPinterestReceiver() {
+    const params = new URLSearchParams(location.search);
+    const token = cleanText(params.get("pinterest-receive"), 80);
+    if (!token) return false;
+    const fallbackUsername = normalizePinterestUsername(params.get("pinterest-user"));
+    try {
+      history.replaceState(null, "", location.pathname + location.hash);
+    } catch {
+      /* ignore */
+    }
+
+    const dialog = $("#pinterestReceiveDialog");
+    if (!dialog) return false;
+    pinterestTransfer = {
+      token,
+      username: fallbackUsername,
+      data: null,
+      readyTimer: 0,
+      handler: null,
+    };
+    if (!dialog.open) dialog.showModal();
+    pinterestWaiting(
+      window.opener
+        ? "Waiting for the Pinterest tab to send boards…"
+        : "This window needs to be opened by the Pinterest bookmarklet. Close it and run the importer from Pinterest."
+    );
+
+    const announce = () => {
+      if (!window.opener) return;
+      try {
+        window.opener.postMessage({ type: "sift:pinterest-ready", token }, "*");
+      } catch {
+        /* ignore */
+      }
+    };
+    announce();
+    pinterestTransfer.readyTimer = window.setInterval(announce, 1400);
+
+    const handler = (event) => {
+      if (!isPinterestOrigin(event.origin)) return;
+      if (!event.data || event.data.type?.startsWith("sift:pinterest-") !== true) return;
+      if (event.data.token !== token) return;
+
+      if (event.data.type === "sift:pinterest-progress") {
+        pinterestProgress(event.data.payload || {});
+        return;
+      }
+      if (event.data.type === "sift:pinterest-error") {
+        const message = cleanText(event.data.payload?.message, 220) || "Pinterest import failed.";
+        const body = $("#pinterestReceiveBody");
+        if (body) {
+          body.innerHTML = `
+            <p class="pinterest-error">${esc(message)}</p>
+            <div class="pinterest-empty">Check that the username is correct and that you are signed in to Pinterest if you expected private boards. Close this window, then run the bookmarklet again.</div>
+            <div class="dialog-actions"><button class="btn btn-quiet" type="button" data-close>Close</button></div>`;
+        }
+        window.clearInterval(pinterestTransfer.readyTimer);
+        return;
+      }
+      if (event.data.type === "sift:pinterest-data") {
+        const data = sanitizePinterestPayload(event.data.payload, fallbackUsername);
+        pinterestTransfer.data = data;
+        window.clearInterval(pinterestTransfer.readyTimer);
+        pinterestPreview(data);
+      }
+    };
+    pinterestTransfer.handler = handler;
+    window.addEventListener("message", handler);
+
+    dialog.addEventListener(
+      "close",
+      () => {
+        window.clearInterval(pinterestTransfer?.readyTimer || 0);
+        if (pinterestTransfer?.handler) {
+          window.removeEventListener("message", pinterestTransfer.handler);
+        }
+        pinterestTransfer = null;
+      },
+      { once: true }
+    );
+    return true;
+  }
+
   function eraseEverything() {
     const pins = allPins().length;
     if (!pins && !state.boards.length) {
@@ -2082,6 +2838,8 @@
     $("#privacyDialog")?.close();
     $("#detailDialog")?.close();
     $("#saveDialog")?.close();
+    $("#pinterestDialog")?.close();
+    $("#pinterestReceiveDialog")?.close();
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch {
@@ -2253,6 +3011,18 @@
         return true;
       case "privacy":
         $("#privacyDialog")?.showModal();
+        return true;
+      case "pinterest":
+        openPinterestDialog();
+        return true;
+      case "pinterest-copy":
+        copyPinterestBookmarklet();
+        return true;
+      case "pinterest-open":
+        openPinterestProfile();
+        return true;
+      case "pinterest-import":
+        importSelectedPinterest();
         return true;
       case "erase":
         eraseEverything();
@@ -2605,6 +3375,25 @@
       if (file) importFile(file);
     });
 
+    $("#pinterestUsername")?.addEventListener("input", updatePinterestBookmarklet);
+    $("#pinterestBookmarklet")?.addEventListener("click", (event) => {
+      event.preventDefault();
+      copyPinterestBookmarklet();
+    });
+
+    document.addEventListener("change", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (target.id === "pinterestSelectAll") {
+        $$("[data-pinterest-board]").forEach((box) => {
+          box.checked = target.checked;
+        });
+        updatePinterestSelection();
+      } else if (target.matches("[data-pinterest-board]")) {
+        updatePinterestSelection();
+      }
+    });
+
     themeMedia.addEventListener("change", () => {
       if (state.prefs.theme === "auto") applyTheme();
     });
@@ -2669,6 +3458,8 @@
     if (bootNotice) {
       window.setTimeout(() => showToast(bootNotice, { duration: 8000 }), 350);
     }
+
+    initPinterestReceiver();
   }
 
   init();

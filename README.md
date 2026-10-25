@@ -2,7 +2,7 @@
 
 **Live:** https://orbitmechanic.github.io/sift/
 
-A private, ad-free image board. Search openly licensed images, save only their links, and grow a feed from the things you chose.
+A private, ad-free image board. Search openly licensed images, save only their links, bring your Pinterest boards across, and grow a feed from the things you chose.
 
 Sift is a static site: HTML, CSS, and vanilla JavaScript with no build step, no framework, and no backend.
 
@@ -65,6 +65,7 @@ Everything is local to the browser. The archive is saved under the `localStorage
           "creator": "Example",
           "license": "CC BY",
           "source": "flickr",
+          "provider": "openverse",
           "foreignLandingUrl": "https://example.org/source-page",
           "width": 1024,
           "height": 685,
@@ -80,7 +81,39 @@ Everything is local to the browser. The archive is saved under the `localStorage
 }
 ```
 
-Pins contain image URLs and small metadata. Sift never downloads image files into the archive and never stores base64 image data.
+Pins contain image URLs and small metadata. Sift never downloads image files into the archive and never stores base64 image data. The `provider` field is one of `openverse`, `wikimedia`, `pinterest`, or `manual`.
+
+Boards imported from Pinterest also carry an optional origin, used to recognize the same board on a later import:
+
+```json
+"origin": {
+  "provider": "pinterest",
+  "boardId": "424605139808106786",
+  "username": "pinterest"
+}
+```
+
+## Pinterest import
+
+Pinterest does not allow a static site to read its boards directly. Sift uses a bookmarklet instead: a small, user-installed bookmark that runs inside your Pinterest tab, reads the boards your browser session can see, and passes them to Sift.
+
+1. Open **Pinterest** in Sift's sidebar and enter the Pinterest username.
+2. Drag **Sift Pinterest Importer** to your bookmarks bar (or use **Copy** and paste it as a bookmark's URL).
+3. Open Pinterest. Sign in first for private boards and the fullest public feeds.
+4. Click the importer in your bookmarks bar.
+5. Sift opens a preview. Choose the boards to keep, then click **Import selected**.
+
+Public boards work without signing in, but Pinterest may return only a preview of each board to anonymous sessions; Sift shows a warning when that happens. Sign in to Pinterest for complete public imports. Private boards appear only when the username belongs to the account signed in to Pinterest in that browser; Sift cannot access another account's private boards.
+
+The importer:
+
+- Reads the board list and every page of each board's pins.
+- Merges into an existing board with the same Pinterest origin, then the same name.
+- Skips image links that are already on the board.
+- Caps imports at 200 boards and 5,000 links per board. The preview lets you deselect boards if the archive is too large for this browser's storage.
+- Sends normalized data directly to the Sift tab with `postMessage`, guarded by a one-time token and a Pinterest origin check. No Sift server, Pinterest password, or Pinterest cookie is involved.
+
+Pinterest's internal web endpoints are unofficial and may change. If an import stops working, Pinterest may have changed its response format or blocked the request.
 
 ## Privacy
 
@@ -88,6 +121,7 @@ Pins contain image URLs and small metadata. Sift never downloads image files int
 - Search queries are sent directly from the browser to Openverse, with Wikimedia Commons as a fallback.
 - Search history stays in memory only and is discarded on reload.
 - Images load from their original hosts. Those hosts can see your IP address; `no-referrer` prevents them from receiving the page URL.
+- Pinterest import is optional and stays in the browser. The bookmarklet reads Pinterest using your current Pinterest session and hands normalized data to Sift; Sift never receives your Pinterest credentials.
 - Export your boards as JSON at any time. Erasing site data removes the archive permanently.
 
 ## Image sources
@@ -95,6 +129,7 @@ Pins contain image URLs and small metadata. Sift never downloads image files int
 - [Openverse](https://openverse.org) is the primary search source.
 - [Wikimedia Commons](https://commons.wikimedia.org) is the fallback.
 - Related images use Openverse's related-image endpoint when an Openverse image ID is available.
+- Pinterest imports only image URLs and metadata from pins. Sift does not grant rights to those images; check the original pin before reusing one.
 
 Openverse anonymous API limits apply (currently 20 requests per minute and 200 per day, with a separate thumbnail limit). If Openverse is unavailable or rate-limited, Sift falls back to Wikimedia Commons. Check the license on each original source page before reusing an image.
 
