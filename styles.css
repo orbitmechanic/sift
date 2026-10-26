@@ -1790,6 +1790,90 @@ img {
   text-transform: uppercase;
 }
 
+.engine-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--paper-raised) 66%, transparent);
+}
+
+.engine-strip-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.engine-strip-label .icon {
+  width: 13px;
+  height: 13px;
+  color: var(--moss);
+}
+
+.engine-buttons {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 220px;
+}
+
+.engine-btn {
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+.engine-btn:hover {
+  border-color: var(--moss);
+  color: var(--moss);
+}
+
+.buffer-section {
+  margin-top: 48px;
+  padding-top: 28px;
+  border-top: 1px solid var(--line);
+}
+
+.buffer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.buffer-head h2 {
+  margin: 4px 0 0;
+  font-family: var(--display);
+  font-size: clamp(1.7rem, 3vw, 2.4rem);
+  font-weight: 350;
+  letter-spacing: -0.035em;
+}
+
+.buffer-head p:not(.eyebrow) {
+  max-width: 580px;
+  margin: 6px 0 0;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .results-tools {
   display: flex;
   align-items: center;
@@ -1848,6 +1932,81 @@ img {
   height: 3px;
   border-radius: 50%;
   background: var(--line-strong);
+}
+
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 15px;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--paper-raised) 72%, transparent);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 8.5px;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+.tag-chip span {
+  color: var(--ink-3);
+  font-size: 7.5px;
+}
+
+.tag-chip:hover {
+  border-color: var(--moss);
+  color: var(--moss);
+}
+
+.default-badge,
+.privacy-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--moss) 35%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--moss) 8%, transparent);
+  color: var(--moss);
+  font-family: var(--mono);
+  font-size: 7.5px;
+  font-style: normal;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.default-badge {
+  margin-left: 8px;
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+}
+
+.privacy-badge.is-private {
+  border-color: color-mix(in srgb, var(--clay) 38%, transparent);
+  background: color-mix(in srgb, var(--clay) 7%, transparent);
+  color: var(--clay);
+  text-transform: none;
+}
+
+.lock-badge {
+  display: inline-flex;
+  margin-left: 6px;
+  color: var(--clay);
+}
+
+.lock-badge .icon {
+  width: 11px;
+  height: 11px;
 }
 
 .board-tools {
@@ -2257,14 +2416,29 @@ img {
   margin-top: 17px;
 }
 
+.detail-description {
+  margin: 12px 0 0;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.detail-tags button,
 .detail-tags span {
   padding: 4px 8px;
   border: 1px solid var(--line);
   border-radius: 3px;
+  background: transparent;
   color: var(--ink-3);
   font-family: var(--mono);
   font-size: 8px;
   letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.detail-tags button:hover {
+  border-color: var(--moss);
+  color: var(--moss);
 }
 
 .detail-actions {
@@ -2355,6 +2529,17 @@ img {
   letter-spacing: -0.03em;
 }
 
+.detail-related-sub {
+  margin: 4px 0 0;
+  color: var(--ink-3);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.detail-related > .tag-row {
+  margin: 0 0 16px;
+}
+
 .related-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2391,6 +2576,82 @@ img {
   color: var(--ink-3);
   font-size: 12px;
   text-align: center;
+}
+
+/* Web image capture */
+
+.capture-steps {
+  margin: 18px 0 0;
+  border-top: 1px solid var(--line);
+}
+
+.capture-step {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 12px;
+  padding: 17px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.capture-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--moss);
+  font-family: var(--mono);
+  font-size: 9px;
+}
+
+.capture-step h3 {
+  margin: 1px 0 5px;
+  font-family: var(--display);
+  font-size: 19px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+
+.capture-step p {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.capture-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 11px;
+}
+
+.engine-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 11px;
+}
+
+.capture-step .field.compact {
+  margin: 12px 0 0;
+}
+
+.capture-step .field.compact input {
+  height: 38px;
+  font-size: 13px;
+}
+
+.capture-waiting {
+  padding: 22px 0;
+  text-align: center;
+}
+
+.capture-waiting .dialog-note {
+  max-width: 430px;
+  margin: 12px auto 16px;
 }
 
 /* Pinterest import */
@@ -3107,6 +3368,36 @@ img {
   .search-view-head,
   .board-title-row {
     display: block;
+  }
+
+  .engine-strip {
+    display: block;
+    padding: 14px;
+  }
+
+  .engine-strip-label {
+    margin-bottom: 10px;
+  }
+
+  .engine-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: 0;
+    margin-bottom: 10px;
+  }
+
+  .engine-btn {
+    padding: 8px 6px;
+    text-align: center;
+  }
+
+  .engine-strip > .btn {
+    width: 100%;
+  }
+
+  .buffer-head {
+    flex-direction: column;
+    gap: 12px;
   }
 
   .results-tools,

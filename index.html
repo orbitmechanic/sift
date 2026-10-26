@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sift — a private image board</title>
-  <meta name="description" content="Sift is a private, ad-free image board. Search open images, save only the links, and grow a feed that belongs to you.">
+  <meta name="description" content="Sift is a private, ad-free image board. Search open images, absorb web image tabs, import Pinterest boards, and grow a feed from the tags you keep.">
   <meta property="og:type" content="website">
   <meta property="og:title" content="Sift — a private image board">
-  <meta property="og:description" content="Search open images, save only the links, and grow a feed that belongs to you.">
+  <meta property="og:description" content="Search open images, absorb web image tabs, import Pinterest boards, and grow a feed from the tags you keep.">
   <meta name="twitter:card" content="summary">
   <meta name="theme-color" content="#f2eee4">
   <meta name="referrer" content="no-referrer">
@@ -287,6 +287,24 @@
     </div>
   </dialog>
 
+  <dialog class="dialog pinterest-dialog" id="webCaptureDialog" aria-labelledby="webCaptureTitle">
+    <div class="dialog-inner">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">Extra image sources</p>
+          <h2 id="webCaptureTitle">Absorb the image tab</h2>
+        </div>
+        <button class="icon-btn dialog-close" type="button" data-close aria-label="Close">
+          <svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>
+        </button>
+      </div>
+      <div id="webCaptureBody"></div>
+      <div class="dialog-actions">
+        <button class="btn btn-quiet" type="button" data-close>Close</button>
+      </div>
+    </div>
+  </dialog>
+
   <dialog class="dialog detail-dialog" id="detailDialog" aria-labelledby="detailTitle">
     <div class="dialog-inner detail-inner" id="detailInner"></div>
   </dialog>
@@ -310,6 +328,7 @@
           <li><strong>No search history is stored.</strong> Sift keeps the current search in memory only. Reload the page and it is gone.</li>
           <li><strong>Image hosts see image requests.</strong> This page uses <code>no-referrer</code>, so hosts do not receive the page you came from, but they can still see your IP address when an image loads.</li>
           <li><strong>Pinterest import stays in your browser.</strong> The optional importer is a bookmarklet that runs inside your Pinterest tab, reads the boards your browser session can see, and passes them directly to Sift. Pinterest credentials are never shared with Sift, and nothing passes through a third-party server.</li>
+          <li><strong>Web image capture is deliberate.</strong> Search engines do not allow this static page to read their results. The optional absorber runs only when you click it on an image-search tab, reads the thumbnails already displayed there, and writes their links to this browser's display buffer. It does not read cookies or send anything to a server.</li>
           <li><strong>You own the escape hatch.</strong> Export your boards as JSON at any time. Clearing this site's browser storage removes them permanently.</li>
         </ul>
         <p class="prose-foot">Openverse and Wikimedia Commons return openly licensed images. Check the license on each original source before reusing an image.</p>
@@ -348,14 +367,15 @@
           <button class="btn btn-quiet" type="button" data-action="export"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg>Export JSON</button>
           <button class="btn btn-quiet" type="button" data-action="import"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Import</button>
           <button class="btn btn-quiet" type="button" data-action="pinterest"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg>Pinterest import</button>
+          <button class="btn btn-quiet" type="button" data-action="web-capture-help"><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg>Web image capture</button>
           <button class="btn btn-danger" type="button" data-action="erase"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>Erase everything</button>
         </div>
       </section>
 
       <section class="settings-block">
         <h3>Image sources</h3>
-        <p class="settings-copy">Search is powered by <a href="https://openverse.org" target="_blank" rel="noopener noreferrer">Openverse</a>, with <a href="https://commons.wikimedia.org" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a> as a fallback. Sift is a static page; there is no backend.</p>
-        <p class="settings-copy fine">Sift v1.1 · No analytics, ever.</p>
+        <p class="settings-copy">Search is powered by <a href="https://openverse.org" target="_blank" rel="noopener noreferrer">Openverse</a>, with <a href="https://commons.wikimedia.org" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a> as a fallback. DuckDuckGo, Brave, Qwant, Startpage, Bing, Ecosia, and Mojeek are read through the displayed-image-tab absorber. Sift is a static page; there is no backend.</p>
+        <p class="settings-copy fine">Sift v1.2 · No analytics, ever.</p>
       </section>
     </div>
   </dialog>

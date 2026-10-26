@@ -3,15 +3,58 @@
   "use strict";
 
   const STORAGE_KEY = "sift.v1";
-  const VERSION = 1;
+  const BUFFER_KEY = "sift.buffer.v1";
+  const VERSION = 2;
   const PAGE_SIZE = 20;
   const MAX_BOARDS = 200;
   const MAX_PINS_PER_BOARD = 5000;
   const PINTEREST_PIN_CAP = 5000;
   const MAX_SEEDS = 14;
+  const MAX_TAGS_PER_PIN = 32;
+  const MAX_BOARD_TAGS = 80;
+  const MAX_MASTER_TAGS = 80;
+  const MAX_BUFFER = 600;
   const FEED_LIMIT = 56;
   const API_BASE = "https://api.openverse.org/v1";
   const WIKI_API = "https://commons.wikimedia.org/w/api.php";
+  const LIKES_ID = "likes";
+  const WEB_ENGINES = {
+    duckduckgo: {
+      label: "DuckDuckGo",
+      hosts: ["duckduckgo.com", "html.duckduckgo.com"],
+      url: (q) => `https://duckduckgo.com/?q=${encodeURIComponent(q)}&iax=images&ia=images`,
+    },
+    brave: {
+      label: "Brave Search",
+      hosts: ["search.brave.com"],
+      url: (q) => `https://search.brave.com/images?q=${encodeURIComponent(q)}`,
+    },
+    qwant: {
+      label: "Qwant",
+      hosts: ["qwant.com", "www.qwant.com"],
+      url: (q) => `https://www.qwant.com/?q=${encodeURIComponent(q)}&t=images`,
+    },
+    startpage: {
+      label: "Startpage",
+      hosts: ["startpage.com", "www.startpage.com"],
+      url: (q) => `https://www.startpage.com/sp/search?query=${encodeURIComponent(q)}&cat=images`,
+    },
+    bing: {
+      label: "Bing Images",
+      hosts: ["bing.com", "www.bing.com"],
+      url: (q) => `https://www.bing.com/images/search?q=${encodeURIComponent(q)}`,
+    },
+    ecosia: {
+      label: "Ecosia",
+      hosts: ["ecosia.org", "www.ecosia.org"],
+      url: (q) => `https://www.ecosia.org/images?q=${encodeURIComponent(q)}`,
+    },
+    mojeek: {
+      label: "Mojeek",
+      hosts: ["mojeek.com", "www.mojeek.com"],
+      url: (q) => `https://www.mojeek.com/search?q=${encodeURIComponent(q)}&t=images`,
+    },
+  };
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -108,12 +151,160 @@
       .slice(0, limit);
   }
 
+  function normalizeTag(value) {
+    if (value && typeof value === "object") {
+      value = value.name || value.value || value.tag || value.title || "";
+    }
+    const tag = cleanText(value, 40)
+      .replace(/^#+/, "")
+      .replace(/[\s_]+/g, " ")
+      .trim()
+      .toLowerCase();
+    if (tag.length < 2 || tag.length > 40) return "";
+    if (!/[a-z\u00c0-\u024f]/i.test(tag)) return "";
+    if (STOPWORDS.has(tag)) return "";
+    return tag;
+  }
+
+  function tagList(raw, limit = MAX_TAGS_PER_PIN) {
+    const out = [];
+    const seen = new Set();
+    const values = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.split(",") : [];
+    for (const value of values) {
+      const tag = normalizeTag(value);
+      if (!tag || seen.has(tag)) continue;
+      seen.add(tag);
+      out.push(tag);
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
+  function hashtagsIn(value) {
+    const out = [];
+    const text = String(value ?? "");
+    const re = /#([\p{L}\p{N}_-]{2,40})/gu;
+    let match;
+    while ((match = re.exec(text))) out.push(match[1]);
+    return out;
+  }
+
+  function tagsFromText(value, limit = 8) {
+    return tagList(
+      [...hashtagsIn(value), ...titleWords(value, limit)],
+      limit
+    );
+  }
+
+  function tagScore(tag, now = Date.now()) {
+    const count = Math.max(1, Number(tag.count) || 1);
+    const last = Date.parse(tag.lastUsedAt || "");
+    const ageDays = Number.isFinite(last) ? Math.max(0, (now - last) / 86400000) : 365;
+    const recency = Math.exp(-ageDays / 45);
+    return count * 2 + recency * 3;
+  }
+
+  function sortTags(tags, limit = MAX_BOARD_TAGS) {
+    return tags
+      .slice()
+      .sort((a, b) => {
+        const score = tagScore(b) - tagScore(a);
+        if (score) return score;
+        if (b.count !== a.count) return b.count - a.count;
+        return String(b.lastUsedAt || "").localeCompare(String(a.lastUsedAt || ""));
+      })
+      .slice(0, limit);
+  }
+
+  function rebuildBoardTags(board) {
+    const map = new Map();
+    for (const pin of board.pins || []) {
+      const when = validIso(pin.savedAt, board.updatedAt || nowIso());
+      for (const tag of tagList(pin.tags)) {
+        const item = map.get(tag) || { value: tag, count: 0, lastUsedAt: "" };
+        item.count += 1;
+        if (!item.lastUsedAt || when > item.lastUsedAt) item.lastUsedAt = when;
+        map.set(tag, item);
+      }
+    }
+    board.tags = sortTags(Array.from(map.values()));
+    return board.tags;
+  }
+
+  function masterTags(limit = 12) {
+    const map = new Map();
+    for (const board of state.boards) {
+      if (board.privacy === "private") continue;
+      for (const tag of board.tags || []) {
+        const item = map.get(tag.value) || { value: tag.value, count: 0, lastUsedAt: "" };
+        item.count += Number(tag.count) || 0;
+        if (!item.lastUsedAt || String(tag.lastUsedAt) > item.lastUsedAt) {
+          item.lastUsedAt = tag.lastUsedAt || "";
+        }
+        map.set(tag.value, item);
+      }
+    }
+    return sortTags(Array.from(map.values()), limit);
+  }
+
+  function ensureLikesBoard(target = state) {
+    let likes = target.boards.find((board) => board.system === "likes");
+    if (!likes) {
+      likes = target.boards.find(
+        (board) => !board.origin && String(board.name || "").trim().toLowerCase() === "likes"
+      );
+    }
+    if (likes) {
+      likes.system = "likes";
+      likes.id = likes.id || LIKES_ID;
+      likes.name = "Likes";
+      return likes;
+    }
+    likes = {
+      id: LIKES_ID,
+      name: "Likes",
+      system: "likes",
+      privacy: "public",
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      seeds: [],
+      tags: [],
+      pins: [],
+    };
+    const collision = target.boards.find((board) => board.id === LIKES_ID);
+    if (collision) likes.id = `${LIKES_ID}-${uid().slice(0, 8)}`;
+    target.boards.unshift(likes);
+    return likes;
+  }
+
   /* ---------------------------------------------------------------------
      Persistent state
      --------------------------------------------------------------------- */
 
   function defaultState() {
     return { version: VERSION, boards: [], prefs: { theme: "auto" } };
+  }
+
+  function sanitizeMeta(raw) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+    const out = {};
+    for (const key of Object.keys(raw).slice(0, 30)) {
+      const name = cleanText(key, 40);
+      if (!name) continue;
+      const value = raw[key];
+      if (typeof value === "string") {
+        const text = cleanText(value, 600);
+        if (text) out[name] = text;
+      } else if (typeof value === "number" && Number.isFinite(value)) {
+        out[name] = value;
+      } else if (typeof value === "boolean") {
+        out[name] = value;
+      } else if (Array.isArray(value)) {
+        const list = value.map((item) => cleanText(item, 120)).filter(Boolean).slice(0, 12);
+        if (list.length) out[name] = list;
+      }
+    }
+    return Object.keys(out).length ? out : undefined;
   }
 
   function sanitizePin(raw) {
@@ -124,11 +315,19 @@
     if (!url) return null;
 
     const thumb = safeUrl(raw.thumb) || url;
-    const tags = Array.isArray(raw.tags)
-      ? raw.tags.map((tag) => cleanText(tag, 40)).filter(Boolean).slice(0, 16)
-      : [];
+    const sourcePage = safeUrl(raw.sourcePage) || safeUrl(raw.foreignLandingUrl) || "";
+    const pinUrl = safeUrl(raw.pinUrl) || "";
+    const tags = tagList([
+      ...(Array.isArray(raw.tags) ? raw.tags : raw.tags ? [raw.tags] : []),
+      ...(Array.isArray(raw.visualTags) ? raw.visualTags : []),
+      ...(Array.isArray(raw.interestTags) ? raw.interestTags : []),
+    ]);
     const width = Number(raw.width);
     const height = Number(raw.height);
+    const engine = WEB_ENGINES[raw.engine] ? raw.engine : "";
+    const provider = ["openverse", "wikimedia", "pinterest", "manual", "web"].includes(raw.provider)
+      ? raw.provider
+      : "manual";
 
     return {
       url,
@@ -136,13 +335,21 @@
       title: cleanText(raw.title, 240) || "Untitled image",
       creator: cleanText(raw.creator, 160) || "Unknown",
       license: cleanText(raw.license, 100) || "See source",
-      source: cleanText(raw.source, 80) || "Open web",
-      foreignLandingUrl: safeUrl(raw.foreignLandingUrl) || "",
+      licenseUrl: safeUrl(raw.licenseUrl) || "",
+      source: cleanText(raw.source, 80) || (engine ? WEB_ENGINES[engine].label : "Open web"),
+      sourcePage,
+      foreignLandingUrl: safeUrl(raw.foreignLandingUrl) || sourcePage || pinUrl,
+      pinUrl,
+      domain: cleanText(raw.domain, 80) || "",
+      engine,
       openverseId: cleanText(raw.openverseId, 80) || "",
-      provider: ["openverse", "wikimedia", "pinterest", "manual"].includes(raw.provider) ? raw.provider : "manual",
+      provider,
+      description: cleanText(raw.description, 600) || "",
       width: Number.isFinite(width) && width > 0 && width <= 50000 ? Math.round(width) : 0,
       height: Number.isFinite(height) && height > 0 && height <= 50000 ? Math.round(height) : 0,
       tags,
+      publishedAt: raw.publishedAt ? validIso(raw.publishedAt, "") : "",
+      meta: sanitizeMeta(raw.meta),
       savedAt: validIso(raw.savedAt, nowIso()),
     };
   }
@@ -193,17 +400,24 @@
           }
         }
 
-        out.boards.push({
+        const board = {
           id,
           name: cleanText(rawBoard.name, 80) || "Untitled board",
+          system: rawBoard.system === "likes" ? "likes" : undefined,
+          privacy: rawBoard.privacy === "private" ? "private" : "public",
           createdAt: validIso(rawBoard.createdAt, nowIso()),
           updatedAt: validIso(rawBoard.updatedAt, nowIso()),
           seeds: sanitizeSeedList(rawBoard.seeds),
           origin: sanitizeBoardOrigin(rawBoard.origin) || undefined,
+          tags: [],
           pins,
-        });
+        };
+        rebuildBoardTags(board);
+        out.boards.push(board);
       }
     }
+
+    ensureLikesBoard(out);
 
     if (raw.prefs && ["auto", "light", "dusk"].includes(raw.prefs.theme)) {
       out.prefs.theme = raw.prefs.theme;
@@ -219,7 +433,11 @@
   function loadState() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return defaultState();
+      if (!raw) {
+        const fresh = defaultState();
+        ensureLikesBoard(fresh);
+        return fresh;
+      }
       return sanitizeState(JSON.parse(raw));
     } catch (error) {
       bootNotice = "Your saved boards could not be read in this browser. Starting with a clean archive.";
@@ -241,6 +459,75 @@
       }
       return false;
     }
+  }
+
+  function loadDisplayBuffer() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(BUFFER_KEY) || "[]");
+      if (!Array.isArray(raw)) return new Map();
+      const out = new Map();
+      for (const item of raw.slice(0, MAX_BUFFER)) {
+        const pin = sanitizePin(item);
+        if (!pin || out.has(pin.url)) continue;
+        out.set(pin.url, pin);
+      }
+      return out;
+    } catch {
+      return new Map();
+    }
+  }
+
+  let displayBuffer = loadDisplayBuffer();
+
+  function persistDisplayBuffer() {
+    try {
+      if (!displayBuffer.size) {
+        localStorage.removeItem(BUFFER_KEY);
+        return;
+      }
+      localStorage.setItem(
+        BUFFER_KEY,
+        JSON.stringify(Array.from(displayBuffer.values()).slice(0, MAX_BUFFER))
+      );
+    } catch {
+      /* the buffer is a convenience; the archive is the source of truth */
+    }
+  }
+
+  function addToDisplayBuffer(image) {
+    if (!image || !image.url) return;
+    displayBuffer.delete(image.url);
+    displayBuffer.set(image.url, image);
+    while (displayBuffer.size > MAX_BUFFER) {
+      let evict = displayBuffer.keys().next().value;
+      for (const [key, item] of displayBuffer) {
+        if (item.provider !== "web") {
+          evict = key;
+          break;
+        }
+      }
+      displayBuffer.delete(evict);
+    }
+    persistDisplayBuffer();
+  }
+
+  function clearDisplayBuffer() {
+    displayBuffer = new Map();
+    try {
+      localStorage.removeItem(BUFFER_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function clearWebBuffer() {
+    let changed = false;
+    for (const [url, item] of displayBuffer) {
+      if (item.provider !== "web") continue;
+      displayBuffer.delete(url);
+      changed = true;
+    }
+    if (changed) persistDisplayBuffer();
   }
 
   function allPins() {
@@ -294,12 +581,20 @@
     const pin = pinFromImage(image);
     if (!pin) return { ok: false, reason: "invalid" };
 
+    if (!pin.tags.length) {
+      pin.tags = tagsFromText(
+        [image.title, image.description, image.creator, image.source].filter(Boolean).join(" "),
+        8
+      );
+    }
+
     board.pins.unshift(pin);
     board.updatedAt = nowIso();
+    rebuildBoardTags(board);
 
     if (sourceQuery) addSeed(board, sourceQuery);
-    if (image.tags) {
-      image.tags.filter(usefulSeed).slice(0, 3).forEach((tag) => addSeed(board, tag));
+    if (pin.tags.length) {
+      pin.tags.filter(usefulSeed).slice(0, 3).forEach((tag) => addSeed(board, tag));
     }
     if (!board.seeds.length) {
       const words = titleWords(image.title, 4);
@@ -307,7 +602,7 @@
     }
 
     persist();
-    imageCache.set(image.url, image);
+    remember(pin);
     ui.dataVersion += 1;
 
     if (ui.feed.items.length) ui.feed.sig = feedSignature();
@@ -330,6 +625,7 @@
     const pin = board.pins[index];
     board.pins.splice(index, 1);
     board.updatedAt = nowIso();
+    rebuildBoardTags(board);
     persist();
     ui.dataVersion += 1;
 
@@ -368,13 +664,16 @@
     }
   }
 
-  function remember(image) {
-    if (image && image.url) imageCache.set(image.url, image);
+  function remember(image, { buffer = true } = {}) {
+    if (!image || !image.url) return image;
+    imageCache.set(image.url, image);
+    if (buffer) addToDisplayBuffer(image);
     return image;
   }
 
   function resolveImage(url) {
     if (!url) return null;
+    if (displayBuffer.has(url)) return displayBuffer.get(url);
     if (imageCache.has(url)) return imageCache.get(url);
     for (const board of state.boards) {
       const found = board.pins.find((pin) => pin.url === url);
@@ -447,6 +746,7 @@
       ? raw.tags.map((tag) => cleanText(tag && tag.name ? tag.name : tag, 40)).filter(Boolean).slice(0, 12)
       : [];
 
+    const sourcePage = safeUrl(raw.foreign_landing_url) || "";
     return remember({
       provider: "openverse",
       openverseId: cleanText(raw.id, 80),
@@ -457,10 +757,25 @@
       license: licenseLabel(raw.license),
       licenseUrl: safeUrl(raw.license_url) || "",
       source: cleanText(raw.source, 60) || "Openverse",
-      foreignLandingUrl: safeUrl(raw.foreign_landing_url) || "",
+      sourcePage,
+      foreignLandingUrl: sourcePage,
+      domain: sourcePage ? new URL(sourcePage).hostname.replace(/^www\./, "") : "",
+      description: stripHtml(raw.description || ""),
       width: Number(raw.width) || 0,
       height: Number(raw.height) || 0,
+      publishedAt: raw.published_date || raw.created_on || "",
       tags,
+      meta: {
+        openverseId: cleanText(raw.id, 80),
+        source: cleanText(raw.source, 60),
+        license: cleanText(raw.license, 40),
+        licenseUrl: safeUrl(raw.license_url) || "",
+        landingUrl: sourcePage,
+        thumbnail: safeUrl(raw.thumbnail) || "",
+        width: Number(raw.width) || 0,
+        height: Number(raw.height) || 0,
+        tags: tags.join(", "),
+      },
     });
   }
 
@@ -511,6 +826,12 @@
     const words = titleWords(title, 8);
     const tags = Array.from(new Set([...words, ...categories.filter(usefulSeed)])).slice(0, 12);
 
+    const sourcePage = safeUrl(info.descriptionurl) || "";
+    const description = stripHtml(
+      (meta.ImageDescription && meta.ImageDescription.value) ||
+        (meta.ObjectName && meta.ObjectName.value) ||
+        ""
+    );
     return remember({
       provider: "wikimedia",
       openverseId: "",
@@ -521,10 +842,26 @@
       license: stripHtml(meta.LicenseShortName && meta.LicenseShortName.value) || "See source",
       licenseUrl: safeUrl(meta.LicenseUrl && meta.LicenseUrl.value) || "",
       source: "Wikimedia Commons",
-      foreignLandingUrl: safeUrl(info.descriptionurl) || "",
+      sourcePage,
+      foreignLandingUrl: sourcePage,
+      domain: "commons.wikimedia.org",
+      description,
       width: Number(info.width) || 0,
       height: Number(info.height) || 0,
+      publishedAt: (meta.DateTimeOriginal && meta.DateTimeOriginal.value) || "",
       tags,
+      meta: {
+        credit: stripHtml(meta.Credit && meta.Credit.value),
+        attribution: stripHtml(meta.Attribution && meta.Attribution.value),
+        objectName: stripHtml(meta.ObjectName && meta.ObjectName.value),
+        description,
+        license: stripHtml(meta.LicenseShortName && meta.LicenseShortName.value),
+        licenseUrl: safeUrl(meta.LicenseUrl && meta.LicenseUrl.value) || "",
+        landingUrl: sourcePage,
+        width: Number(info.width) || 0,
+        height: Number(info.height) || 0,
+        categories: categories.join(", "),
+      },
     });
   }
 
@@ -539,7 +876,7 @@
       prop: "imageinfo|categories",
       iiprop: "url|extmetadata|size",
       iiurlwidth: "800",
-      iiextmetadatafilter: "LicenseShortName|Artist|Credit|LicenseUrl",
+      iiextmetadatafilter: "LicenseShortName|Artist|Credit|LicenseUrl|ImageDescription|ObjectName|Attribution|DateTimeOriginal",
       cllimit: "12",
       format: "json",
       formatversion: "2",
@@ -579,10 +916,74 @@
     }
   }
 
+  async function searchAllSources(query, signal) {
+    const key = `all:${String(query).toLowerCase()}`;
+    if (searchCache.has(key)) return searchCache.get(key);
+
+    const settled = await Promise.allSettled([
+      openverseSearch(query, 1, signal),
+      wikimediaSearch(query, 1, signal),
+    ]);
+    if (signal && signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+    const items = [];
+    const seen = new Set();
+    const notices = [];
+    let successes = 0;
+    for (const result of settled) {
+      if (result.status !== "fulfilled") continue;
+      successes += 1;
+      for (const item of result.value.items || []) {
+        if (!item || !item.url || seen.has(item.url)) continue;
+        seen.add(item.url);
+        items.push(item);
+      }
+    }
+    if (!successes) {
+      const reason = settled.find((result) => result.status === "rejected");
+      throw (reason && reason.reason) || new Error("No image sources answered.");
+    }
+    if (successes === 1) notices.push("Only one image source answered. Results may be thinner.");
+    const result = { provider: "all", items, page: 1, pageCount: 1, total: items.length, notice: notices.join(" ") };
+    cacheSet(searchCache, key, result);
+    return result;
+  }
+
+  function bufferMatchesTags(tags, limit = 16) {
+    const wanted = new Set(tagList(tags));
+    if (!wanted.size) return [];
+    const out = [];
+    for (const item of Array.from(displayBuffer.values()).reverse()) {
+      if (!item || !item.url) continue;
+      const itemTags = tagList(item.tags);
+      if (itemTags.some((tag) => wanted.has(tag))) out.push(item);
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
+  function relatedQuery(image) {
+    const tags = tagList(image && image.tags).slice(0, 4);
+    if (tags.length) return tags.join(" ");
+    return titleWords((image && image.title) || "", 4).join(" ");
+  }
+
   async function relatedImages(image, signal) {
     if (!image || (!image.openverseId && !image.tags.length && !image.title)) return [];
     const key = image.openverseId ? `related:${image.openverseId}` : `related-search:${image.url}`;
     if (relatedCache.has(key)) return relatedCache.get(key);
+
+    const query = relatedQuery(image);
+    if (query) {
+      try {
+        const data = await searchAllSources(query, signal);
+        const items = data.items.filter((item) => item.url !== image.url).slice(0, 16);
+        cacheSet(relatedCache, key, items);
+        return items;
+      } catch (error) {
+        if (error.name === "AbortError" || (signal && signal.aborted)) throw error;
+      }
+    }
 
     if (image.openverseId) {
       try {
@@ -600,18 +1001,39 @@
       }
     }
 
-    const query = (image.tags.length ? image.tags.slice(0, 3) : titleWords(image.title, 4)).join(" ");
-    if (!query) return [];
-    try {
-      const data = await searchImages(query, 1, signal);
-      const items = data.items.filter((item) => item.url !== image.url).slice(0, 16);
-      cacheSet(relatedCache, key, items);
-      return items;
-    } catch (error) {
-      if (error.name === "AbortError") throw error;
-      cacheSet(relatedCache, key, []);
-      return [];
+    cacheSet(relatedCache, key, []);
+    return [];
+  }
+
+  async function tagRelatedImages(tags, signal, limit = 16) {
+    const top = tagList(tags).slice(0, 4);
+    if (!top.length) return [];
+    const key = `tags:${top.join(",")}`;
+    if (relatedCache.has(key)) return relatedCache.get(key);
+    const tasks = top.slice(0, 3).map((tag) =>
+      searchAllSources(tag, signal).then((result) => result.items).catch(() => [])
+    );
+    const settled = await Promise.allSettled(tasks);
+    if (signal && signal.aborted) throw new DOMException("Aborted", "AbortError");
+    const items = [];
+    const seen = new Set();
+    for (const result of settled) {
+      if (result.status !== "fulfilled") continue;
+      for (const item of result.value) {
+        if (!item || !item.url || seen.has(item.url)) continue;
+        seen.add(item.url);
+        items.push(item);
+      }
     }
+    const buffered = bufferMatchesTags(top, limit);
+    for (const item of buffered) {
+      if (seen.has(item.url)) continue;
+      seen.add(item.url);
+      items.push(item);
+    }
+    const out = items.slice(0, limit);
+    cacheSet(relatedCache, key, out);
+    return out;
   }
 
   /* ---------------------------------------------------------------------
@@ -632,6 +1054,7 @@
       loading: false,
       error: "",
       notice: "",
+      source: "",
     },
     feed: {
       loading: false,
@@ -659,6 +1082,10 @@
       loading: false,
       error: "",
       token: 0,
+      boardRelated: [],
+      boardLoading: false,
+      boardError: "",
+      boardTags: [],
     },
     saveImage: null,
     savePreferredBoard: "",
@@ -670,6 +1097,12 @@
       seed: "",
     },
     linkBoardId: "",
+    webCapture: {
+      token: "",
+      engine: "",
+      query: "",
+      waiting: false,
+    },
     toastTimer: 0,
     toastAction: null,
     lastQuery: "",
@@ -919,6 +1352,7 @@
             <button class="board-item" type="button" data-nav="board" data-board-id="${esc(board.id)}">
               <span class="board-swatch" style="--swatch:${swatchFor(board.id)}"></span>
               <span class="board-name">${esc(board.name)}</span>
+              ${board.privacy === "private" ? `<span class="lock-badge" title="Private board">${icon("lock")}</span>` : ""}
               <span class="nav-count">${board.pins.length}</span>
             </button>
           </li>`
@@ -975,34 +1409,43 @@
      Home
      --------------------------------------------------------------------- */
 
+  function webBufferSignature() {
+    const web = Array.from(displayBuffer.values()).filter((item) => item.provider === "web");
+    const latest = web.reduce(
+      (newest, item) => (String(item.savedAt || "") > newest ? String(item.savedAt) : newest),
+      ""
+    );
+    return `${web.length}:${latest}`;
+  }
+
   function feedSignature() {
     return state.boards
-      .map((board) => `${board.id}:${board.pins.length}:${board.seeds.join(",")}`)
-      .join("|");
+      .map(
+        (board) =>
+          `${board.id}:${board.privacy}:${board.pins.length}:${board.seeds.join(",")}:${(
+            board.tags || []
+          )
+            .map((tag) => `${tag.value}:${tag.count}:${tag.lastUsedAt}`)
+            .join(",")}`
+      )
+      .join("|") + `|web:${webBufferSignature()}`;
   }
 
   function buildInterestProfile(boards = state.boards) {
-    const scores = new Map();
-    const bump = (value, weight) => {
-      const seed = cleanText(value, 80).toLowerCase();
-      if (!usefulSeed(seed)) return;
-      scores.set(seed, (scores.get(seed) || 0) + weight);
-    };
-
+    const map = new Map();
     for (const board of boards) {
-      for (const seed of board.seeds) bump(seed, 3);
-      const boardWords = titleWords(board.name, 4);
-      boardWords.forEach((word) => bump(word, 1));
-      for (const pin of board.pins.slice(0, 60)) {
-        (pin.tags || []).forEach((tag) => bump(tag, 2));
-        titleWords(pin.title, 4).forEach((word) => bump(word, 1));
+      if (board.privacy === "private") continue;
+      for (const tag of board.tags || []) {
+        const item = map.get(tag.value) || { value: tag.value, count: 0, lastUsedAt: "" };
+        item.count += Number(tag.count) || 0;
+        if (!item.lastUsedAt || String(tag.lastUsedAt) > item.lastUsedAt) {
+          item.lastUsedAt = tag.lastUsedAt || "";
+        }
+        map.set(tag.value, item);
       }
     }
-
-    return Array.from(scores.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 8)
-      .map(([seed]) => seed);
+    if (map.size) return sortTags(Array.from(map.values()), 12).map((tag) => tag.value);
+    return [];
   }
 
   function feedBodyHTML() {
@@ -1102,50 +1545,52 @@
       if (ui.view.name === "home") render();
     }
 
-    const profile = buildInterestProfile();
-    const seeds = profile.length ? profile : state.boards.flatMap((board) => board.seeds).slice(0, 4);
-    ui.feed.seeds = seeds.slice(0, 6);
-
-    const savedUrls = new Set(allPins().map((pin) => pin.url));
-    const anchor = allPins()
-      .filter((pin) => pin.openverseId)
-      .sort((a, b) => String(b.savedAt).localeCompare(String(a.savedAt)))[0] || null;
-    ui.feed.anchor = anchor ? anchor.url : null;
-
-    const tasks = [];
-    if (anchor) {
-      tasks.push(
-        relatedImages(anchor).catch((error) => {
-          if (error.name === "AbortError") throw error;
-          return [];
-        })
+    const master = masterTags(12);
+    let seeds = master.map((tag) => tag.value);
+    if (!seeds.length) {
+      const publicBoards = state.boards.filter(
+        (board) => board.privacy !== "private" && (board.pins.length || board.seeds.length)
       );
+      seeds = publicBoards
+        .flatMap((board) => [...(board.seeds || []), ...titleWords(board.name, 2)])
+        .filter(usefulSeed)
+        .slice(0, 6);
     }
-    for (const seed of seeds.slice(0, anchor ? 2 : 3)) {
-      tasks.push(searchImages(seed).then((result) => result.items).catch(() => []));
-    }
+    ui.feed.seeds = seeds.slice(0, 6);
+    ui.feed.anchor = null;
 
-    if (!tasks.length) {
+    if (!seeds.length) {
       ui.feed.loading = false;
-      ui.feed.error = "Add a seed to a board or save an image to begin the feed.";
+      ui.feed.error =
+        "Save an image to a public board to start the feed. Private boards are kept out of shared suggestions.";
       if (ui.view.name === "home") render();
       return;
     }
 
+    const savedUrls = new Set(allPins().map((pin) => pin.url));
+    const buffered = bufferMatchesTags(seeds, 18);
+    const tasks = seeds.slice(0, 3).map((seed) =>
+      searchAllSources(seed).catch(() => null)
+    );
+
     try {
       const settled = await Promise.allSettled(tasks);
       const notices = [];
-      const items = [];
-      let anySuccess = false;
+      const groups = [buffered];
+      let anySuccess = buffered.length > 0;
 
       for (const result of settled) {
-        if (result.status !== "fulfilled") continue;
+        if (result.status !== "fulfilled" || !result.value) continue;
         anySuccess = true;
-        if (result.value && result.value.notice) notices.push(result.value.notice);
-        if (Array.isArray(result.value)) {
-          items.push(...result.value);
-        } else if (Array.isArray(result.value.items)) {
-          items.push(...result.value.items);
+        groups.push(result.value.items || []);
+        if (result.value.notice) notices.push(result.value.notice);
+      }
+
+      const items = [];
+      const max = Math.max(0, ...groups.map((group) => group.length));
+      for (let index = 0; index < max; index += 1) {
+        for (const group of groups) {
+          if (group[index]) items.push(group[index]);
         }
       }
 
@@ -1162,7 +1607,7 @@
       if (!anySuccess) {
         ui.feed.error = "Sift could not reach the image sources. Check your connection and try again.";
       } else if (!ui.feed.items.length) {
-        ui.feed.error = "The image sources had nothing new for these seeds. Try a different search or save another image.";
+        ui.feed.error = "The image sources had nothing new for these tags. Save another image or try a different search.";
       }
     } catch (error) {
       if (error.name !== "AbortError") {
@@ -1186,10 +1631,55 @@
      Search
      --------------------------------------------------------------------- */
 
+  function webBufferItems(exclude = new Set()) {
+    return Array.from(displayBuffer.values())
+      .filter((item) => item.provider === "web" && !exclude.has(item.url))
+      .reverse()
+      .slice(0, 24);
+  }
+
+  function bufferSectionHTML(exclude = new Set()) {
+    const items = webBufferItems(exclude);
+    if (!items.length) return "";
+    return `<section class="buffer-section">
+      <div class="buffer-head">
+        <div>
+          <p class="eyebrow">Displayed-link buffer</p>
+          <h2>Absorbed from web image tabs</h2>
+          <p>Links stay here even when an engine tab closes. Open any one to keep it on a board.</p>
+        </div>
+        <button class="btn btn-quiet btn-small" type="button" data-action="clear-buffer">${icon("trash")}Clear buffer</button>
+      </div>
+      ${masonryHTML(items, { showSave: true })}
+    </section>`;
+  }
+
+  function engineStripHTML(query) {
+    return `<div class="engine-strip">
+      <div class="engine-strip-label">${icon("spark")}<span>More image sources</span></div>
+      <div class="engine-buttons">
+        ${Object.entries(WEB_ENGINES)
+          .map(
+            ([key, spec]) => `<button class="engine-btn" type="button" data-action="engine-tab" data-engine="${esc(
+              key
+            )}" data-query="${esc(query)}" title="Open ${esc(spec.label)} image results in a new tab">${esc(
+              spec.label
+            )}</button>`
+          )
+          .join("")}
+      </div>
+      <button class="btn btn-quiet btn-small" type="button" data-action="web-capture-help">${icon(
+        "link"
+      )}How capture works</button>
+    </div>`;
+  }
+
   function renderSearch() {
     const data = ui.search;
     const resultCount = data.total || data.items.length;
     const hasResults = data.items.length > 0;
+    const seenResults = new Set(data.items.map((item) => item.url));
+    const buffered = webBufferItems(seenResults);
 
     $("#view").innerHTML = `<div class="view-inner">
       <header class="search-view-head">
@@ -1199,8 +1689,10 @@
           <div class="search-context" aria-live="polite">
             ${
               data.loading && !hasResults
-                ? `<span>Searching Openverse</span>`
-                : `<span>${resultCount.toLocaleString()} image${resultCount === 1 ? "" : "s"}</span><span>Openly licensed</span><span>No search history</span>`
+                ? `<span>Searching Openverse and Wikimedia</span>`
+                : `<span>${resultCount.toLocaleString()} image${resultCount === 1 ? "" : "s"}</span>${
+                    data.source ? `<span>${esc(data.source)}</span>` : `<span>Openly licensed</span>`
+                  }<span>No search history</span>`
             }
           </div>
         </div>
@@ -1210,6 +1702,7 @@
           )}">${icon("plus")}Start a board from this</button>
         </div>
       </header>
+      ${engineStripHTML(data.query)}
       ${noticeHTML(data.notice)}
       ${
         data.error
@@ -1228,7 +1721,7 @@
           : ""
       }
       ${
-        !data.loading && !data.error && !hasResults
+        !data.loading && !data.error && !hasResults && !buffered.length
           ? `<div class="empty-panel" style="margin-top:26px">
               <div class="empty-inner">
                 ${brandMarkSVG()}
@@ -1251,6 +1744,7 @@
             </div>`
           : ""
       }
+      ${bufferSectionHTML(seenResults)}
     </div>`;
     document.title = `${data.query} — Sift`;
   }
@@ -1276,6 +1770,7 @@
         loading: true,
         error: "",
         notice: "",
+        source: "",
       };
       ui.lastQuery = query;
       ui.view = { name: "search", query };
@@ -1363,7 +1858,9 @@
      --------------------------------------------------------------------- */
 
   function boardRelatedSignature(board) {
-    return `${board.id}:${board.pins.length}:${board.seeds.join(",")}`;
+    return `${board.id}:${board.privacy}:${board.pins.length}:${(board.tags || [])
+      .map((tag) => `${tag.value}:${tag.count}:${tag.lastUsedAt}`)
+      .join(",")}:${board.seeds.join(",")}:web:${webBufferSignature()}`;
   }
 
   function boardRelatedBodyHTML() {
@@ -1381,7 +1878,7 @@
       return `<div class="empty-panel" style="min-height:250px">
         <div class="empty-inner">
           <h2>Nothing close by yet.</h2>
-          <p>Save a search result or add a seed to this board, then ask again.</p>
+          <p>Save an image with tags or add a seed to this board, then ask again.</p>
         </div>
       </div>`;
     }
@@ -1410,28 +1907,41 @@
     }
 
     const pins = [...board.pins].sort((a, b) => String(b.savedAt).localeCompare(String(a.savedAt)));
-    const canFindRelated = pins.length > 0 || board.seeds.length > 0;
+    const boardTags = (board.tags || []).slice(0, 18);
+    const canFindRelated = pins.length > 0 || board.seeds.length > 0 || boardTags.length > 0;
 
     $("#view").innerHTML = `<div class="view-inner">
       <header class="board-head">
         <div class="board-title-row">
           <div class="board-title-wrap">
             <p class="eyebrow">A board from your archive</p>
-            <h1 class="view-title">${esc(board.name)}</h1>
+            <h1 class="view-title">${esc(board.name)}${
+              board.system === "likes" ? ` <span class="default-badge">default</span>` : ""
+            }</h1>
             <div class="board-sub">
               <span>${pins.length} image link${pins.length === 1 ? "" : "s"}</span>
               <span class="dot"></span>
               <span>Kept ${new Date(board.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</span>
               <span class="dot"></span>
-              <span>Private to this browser</span>
+              <span class="privacy-badge${board.privacy === "private" ? " is-private" : ""}">${
+                board.privacy === "private" ? "Private board" : "Included in the field"
+              }</span>
             </div>
             ${
-              board.seeds.length
-                ? `<div class="seed-row">${board.seeds
-                    .slice(0, 12)
-                    .map((seed) => `<span class="seed-chip">${esc(seed)}</span>`)
+              boardTags.length
+                ? `<div class="tag-row">${boardTags
+                    .map(
+                      (tag) => `<button class="tag-chip" type="button" data-search="${esc(
+                        tag.value
+                      )}" title="Search for ${esc(tag.value)}">${esc(tag.value)}<span>${tag.count}</span></button>`
+                    )
                     .join("")}</div>`
-                : ""
+                : board.seeds.length
+                  ? `<div class="seed-row">${board.seeds
+                      .slice(0, 12)
+                      .map((seed) => `<span class="seed-chip">${esc(seed)}</span>`)
+                      .join("")}</div>`
+                  : ""
             }
           </div>
           <div class="board-tools">
@@ -1442,8 +1952,19 @@
             <div class="board-menu-wrap">
               <button class="icon-btn" type="button" data-action="board-menu" aria-label="Board options" aria-expanded="false">${icon("more")}</button>
               <div class="menu-popover" hidden>
-                <button type="button" data-action="rename-board">${icon("edit")}Rename board</button>
-                <button type="button" class="is-danger" data-action="delete-board">${icon("trash")}Delete board</button>
+                ${
+                  board.system === "likes"
+                    ? ""
+                    : `<button type="button" data-action="rename-board">${icon("edit")}Rename board</button>`
+                }
+                <button type="button" data-action="toggle-board-privacy">${icon(
+                  board.privacy === "private" ? "external" : "lock"
+                )}${board.privacy === "private" ? "Make public" : "Make private"}</button>
+                ${
+                  board.system === "likes"
+                    ? ""
+                    : `<button type="button" class="is-danger" data-action="delete-board">${icon("trash")}Delete board</button>`
+                }
               </div>
             </div>
           </div>
@@ -1470,8 +1991,15 @@
         <div class="section-head">
           <div>
             <p class="eyebrow">In the same vein</p>
-            <h2>More like this board.</h2>
-            <p>Suggested from this board's seeds and saved images. Save anything that belongs here.</p>
+            <h2>Drawn from this board's tags.</h2>
+            <p>${
+              boardTags.length
+                ? `A mini-feed for ${esc(board.name)}, starting with ${boardTags
+                    .slice(0, 4)
+                    .map((tag) => `“${esc(tag.value)}”`)
+                    .join(", ")}.`
+                : "Suggested from this board's seeds and saved images. Save anything that belongs here."
+            }</p>
           </div>
           <div class="section-actions">
             <button class="icon-action" type="button" data-action="refresh-board-related" ${
@@ -1509,34 +2037,34 @@
     ui.boardRelated.notice = "";
     if (ui.view.name === "board" && ui.view.boardId === board.id) render();
 
-    const seeds = [...board.seeds];
-    if (!seeds.length) {
-      const profile = buildInterestProfile([board]);
-      seeds.push(...profile);
-    }
-    if (!seeds.length) seeds.push(titleCase(board.name));
+    let seeds = (board.tags || []).slice(0, 4).map((tag) => tag.value);
+    if (!seeds.length) seeds = board.seeds.slice(0, 4);
+    if (!seeds.length) seeds = titleWords(board.name, 3);
+    if (!seeds.length) seeds = [titleCase(board.name)];
+    ui.boardRelated.anchor = null;
 
     const savedUrls = new Set(allPins().map((pin) => pin.url));
-    const anchor = [...board.pins]
-      .filter((pin) => pin.openverseId)
-      .sort((a, b) => String(b.savedAt).localeCompare(String(a.savedAt)))[0] || null;
-    ui.boardRelated.anchor = anchor ? anchor.url : null;
-
-    const tasks = [];
-    if (anchor) tasks.push(relatedImages(anchor).catch(() => []));
-    for (const seed of seeds.slice(0, anchor ? 2 : 3)) {
-      tasks.push(searchImages(seed).then((result) => result.items).catch(() => []));
-    }
+    const buffered = bufferMatchesTags(seeds, 12);
+    const tasks = seeds.slice(0, 3).map((seed) =>
+      searchAllSources(seed).catch(() => null)
+    );
 
     try {
       const settled = await Promise.allSettled(tasks);
       if (token !== ui.boardRelated.token) return;
       const items = [];
       const notices = [];
+      const groups = [buffered];
       for (const result of settled) {
         if (result.status !== "fulfilled" || !result.value) continue;
+        groups.push(result.value.items || []);
         if (result.value.notice) notices.push(result.value.notice);
-        if (Array.isArray(result.value)) items.push(...result.value);
+      }
+      const max = Math.max(0, ...groups.map((group) => group.length));
+      for (let index = 0; index < max; index += 1) {
+        for (const group of groups) {
+          if (group[index]) items.push(group[index]);
+        }
       }
 
       const seen = new Set();
@@ -1563,17 +2091,9 @@
      Detail dialog
      --------------------------------------------------------------------- */
 
-  function detailRelatedHTML() {
-    if (ui.detail.loading) {
-      return `<div class="related-empty">Looking for related images…</div>`;
-    }
-    if (ui.detail.error) {
-      return `<div class="related-empty">${esc(ui.detail.error)}</div>`;
-    }
-    if (!ui.detail.related.length) {
-      return `<div class="related-empty">No close relatives surfaced. Try a search with a broader phrase.</div>`;
-    }
-    return `<div class="related-grid">${ui.detail.related
+  function relatedGridHTML(items, emptyMessage) {
+    if (!items.length) return `<div class="related-empty">${esc(emptyMessage)}</div>`;
+    return `<div class="related-grid">${items
       .slice(0, 12)
       .map(
         (image) => `<button class="related-card" type="button" data-action="open-related" data-url="${esc(
@@ -1589,6 +2109,39 @@
       .join("")}</div>`;
   }
 
+  function detailRelatedHTML() {
+    if (ui.detail.loading) return `<div class="related-empty">Looking for images with these tags…</div>`;
+    if (ui.detail.error) return `<div class="related-empty">${esc(ui.detail.error)}</div>`;
+    return relatedGridHTML(
+      ui.detail.related,
+      "No close relatives surfaced. Save a few more images with tags, or search a broader phrase."
+    );
+  }
+
+  function detailBoardRelatedHTML() {
+    if (!ui.detail.boardId) return "";
+    if (ui.detail.boardLoading) return `<div class="related-empty">Following this board's tags…</div>`;
+    if (ui.detail.boardError) return `<div class="related-empty">${esc(ui.detail.boardError)}</div>`;
+    if (!ui.detail.boardTags.length) {
+      return `<div class="related-empty">This board has no tags yet. Save images with tags to grow its mini-feed.</div>`;
+    }
+    return relatedGridHTML(
+      ui.detail.boardRelated,
+      "This board's tags did not surface anything new right now."
+    );
+  }
+
+  function tagStripHTML(tags, limit = 12) {
+    return `<div class="tag-row">${tags
+      .slice(0, limit)
+      .map(
+        (tag) => `<button class="tag-chip" type="button" data-search="${esc(
+          tag.value
+        )}" title="Search for ${esc(tag.value)}">${esc(tag.value)}<span>${tag.count}</span></button>`
+      )
+      .join("")}</div>`;
+  }
+
   function renderDetail() {
     const image = ui.detail.image;
     if (!image) return;
@@ -1600,6 +2153,26 @@
     const src = safeUrl(image.thumb) || image.url;
     const dimensions =
       image.width && image.height ? `${image.width} × ${image.height}` : "Not recorded";
+    const sourcePage = safeUrl(image.sourcePage) || safeUrl(image.foreignLandingUrl);
+    const pinUrl = safeUrl(image.pinUrl);
+    const domain =
+      image.domain ||
+      (() => {
+        try {
+          return sourcePage ? new URL(sourcePage).hostname.replace(/^www\./, "") : "";
+        } catch {
+          return "";
+        }
+      })();
+    const imageTags = tagList(image.tags, 16);
+    const boardTags = (board && board.tags ? board.tags : []).slice(0, 12);
+    const published = image.publishedAt
+      ? new Date(image.publishedAt).toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        })
+      : "";
 
     $("#detailInner").innerHTML = `
       <div class="detail-top">
@@ -1619,10 +2192,18 @@
               board ? ` · kept in ${esc(board.name)}` : ""
             }</p>
             ${
-              image.tags && image.tags.length
-                ? `<div class="detail-tags">${image.tags
-                    .slice(0, 8)
-                    .map((tag) => `<span>${esc(tag)}</span>`)
+              image.description
+                ? `<p class="detail-description">${esc(image.description)}</p>`
+                : ""
+            }
+            ${
+              imageTags.length
+                ? `<div class="detail-tags">${imageTags
+                    .map(
+                      (tag) => `<button type="button" data-search="${esc(
+                        tag
+                      )}" title="Search for ${esc(tag)}">${esc(tag)}</button>`
+                    )
                     .join("")}</div>`
                 : ""
             }
@@ -1638,10 +2219,17 @@
               "external"
             )}Open image</a>
             ${
-              image.foreignLandingUrl
+              sourcePage && sourcePage !== pinUrl
                 ? `<a class="btn btn-quiet" href="${esc(
-                    image.foreignLandingUrl
+                    sourcePage
                   )}" target="_blank" rel="noopener noreferrer">${icon("link")}Source page</a>`
+                : ""
+            }
+            ${
+              pinUrl
+                ? `<a class="btn btn-quiet" href="${esc(
+                    pinUrl
+                  )}" target="_blank" rel="noopener noreferrer">${icon("link")}Pinterest pin</a>`
                 : ""
             }
           </div>
@@ -1649,7 +2237,9 @@
           <dl class="detail-meta">
             <div><dt>License</dt><dd>${esc(image.license || "See source")}</dd></div>
             <div><dt>Source</dt><dd>${esc(sourceLabel(image))}</dd></div>
+            ${domain ? `<div><dt>Domain</dt><dd>${esc(domain)}</dd></div>` : ""}
             <div><dt>Dimensions</dt><dd>${esc(dimensions)}</dd></div>
+            ${published ? `<div><dt>Published</dt><dd>${esc(published)}</dd></div>` : ""}
             <div><dt>Stored as</dt><dd>A link, not a file</dd></div>
           </dl>
 
@@ -1662,15 +2252,45 @@
           }
         </div>
       </div>
+
       <section class="detail-related">
         <div class="detail-related-head">
-          <h3>More like this</h3>
+          <div>
+            <h3>More from this image's tags</h3>
+            <p class="detail-related-sub">A mini-feed built from ${
+              imageTags.length
+                ? imageTags.slice(0, 4).map((tag) => `“${esc(tag)}”`).join(", ")
+                : "the image's title"
+            }.</p>
+          </div>
           <button class="icon-action" type="button" data-action="refresh-detail-related">${icon(
             "shuffle"
           )}Refresh</button>
         </div>
         <div id="detailRelatedBody">${detailRelatedHTML()}</div>
-      </section>`;
+      </section>
+
+      ${
+        board
+          ? `<section class="detail-related">
+              <div class="detail-related-head">
+                <div>
+                  <h3>More from ${esc(board.name)}'s tags</h3>
+                  <p class="detail-related-sub">${
+                    boardTags.length
+                      ? "Then the board's own tag list, by frequency and recency."
+                      : "This board has no tags yet."
+                  }</p>
+                </div>
+                <button class="icon-action" type="button" data-action="refresh-detail-related">${icon(
+                  "shuffle"
+                )}Refresh</button>
+              </div>
+              ${boardTags.length ? tagStripHTML(boardTags, 10) : ""}
+              <div id="detailBoardRelatedBody">${detailBoardRelatedHTML()}</div>
+            </section>`
+          : ""
+      }`;
 
     const dialog = $("#detailDialog");
     if (!dialog.open) dialog.showModal();
@@ -1679,17 +2299,27 @@
   async function openDetail(image, boardId = "") {
     if (!image) return;
     remember(image);
+    const inferredBoard =
+      (boardId && boardById(boardId)) ||
+      state.boards.find((candidate) => candidate.pins.some((pin) => pin.url === image.url)) ||
+      null;
+    const resolvedBoardId = inferredBoard ? inferredBoard.id : "";
+    const board = inferredBoard;
     const token = ui.detail.token + 1;
     ui.detail = {
       image,
-      boardId: boardId || "",
+      boardId: resolvedBoardId,
       related: [],
       loading: true,
       error: "",
       token,
+      boardRelated: [],
+      boardLoading: Boolean(board && (board.tags || []).length),
+      boardError: "",
+      boardTags: board ? (board.tags || []).slice(0, 10) : [],
     };
     renderDetail();
-    await loadDetailRelated(token);
+    await Promise.all([loadDetailRelated(token), loadDetailBoardRelated(token)]);
   }
 
   async function loadDetailRelated(token) {
@@ -1717,15 +2347,55 @@
     }
   }
 
+  async function loadDetailBoardRelated(token) {
+    const board = ui.detail.boardId ? boardById(ui.detail.boardId) : null;
+    if (!board || !(board.tags || []).length) {
+      ui.detail.boardLoading = false;
+      ui.detail.boardRelated = [];
+      const body = $("#detailBoardRelatedBody");
+      if (body) body.innerHTML = detailBoardRelatedHTML();
+      return;
+    }
+
+    const body = $("#detailBoardRelatedBody");
+    if (body) body.innerHTML = detailBoardRelatedHTML();
+    try {
+      const items = await tagRelatedImages(
+        board.tags.slice(0, 6).map((tag) => tag.value),
+        undefined,
+        12
+      );
+      if (token !== ui.detail.token) return;
+      const image = ui.detail.image;
+      const saved = new Set(allPins().map((pin) => pin.url));
+      ui.detail.boardRelated = items
+        .filter((item) => item && item.url !== image.url && !saved.has(item.url))
+        .slice(0, 12);
+      ui.detail.boardLoading = false;
+      ui.detail.boardError = "";
+    } catch {
+      if (token !== ui.detail.token) return;
+      ui.detail.boardLoading = false;
+      ui.detail.boardError = "The board's tag mini-feed could not be reached right now.";
+    }
+    if (token === ui.detail.token) {
+      const updated = $("#detailBoardRelatedBody");
+      if (updated) updated.innerHTML = detailBoardRelatedHTML();
+    }
+  }
+
   function refreshDetailRelated() {
     if (!ui.detail.image) return;
     ui.detail.token += 1;
     ui.detail.related = [];
     ui.detail.loading = true;
     ui.detail.error = "";
-    const body = $("#detailRelatedBody");
-    if (body) body.innerHTML = detailRelatedHTML();
+    ui.detail.boardRelated = [];
+    ui.detail.boardLoading = Boolean(ui.detail.boardTags.length);
+    ui.detail.boardError = "";
+    renderDetail();
     loadDetailRelated(ui.detail.token);
+    loadDetailBoardRelated(ui.detail.token);
   }
 
   /* ---------------------------------------------------------------------
@@ -1753,14 +2423,21 @@
       return;
     }
 
-    boards.innerHTML = state.boards
+    const ordered = [...state.boards].sort(
+      (a, b) => Number(b.system === "likes") - Number(a.system === "likes")
+    );
+    boards.innerHTML = ordered
       .map((board) => {
         const contained = board.pins.some((pin) => pin.url === image.url);
-        return `<button class="save-board${contained ? " is-contained" : ""}" type="button" data-action="save-to-board" data-board-id="${esc(
+        return `<button class="save-board${contained ? " is-contained" : ""}${
+          board.system === "likes" ? " is-likes" : ""
+        }" type="button" data-action="save-to-board" data-board-id="${esc(
           board.id
         )}" data-url="${esc(image.url)}">
           <span class="board-swatch" style="--swatch:${swatchFor(board.id)}"></span>
-          <span class="save-board-name">${esc(board.name)}</span>
+          <span class="save-board-name">${esc(board.name)}${
+            board.system === "likes" ? `<span class="default-badge">default</span>` : ""
+          }${board.privacy === "private" ? `<span class="lock-badge" title="Private board">${icon("lock")}</span>` : ""}</span>
           <span class="save-board-count">${board.pins.length}</span>
           ${contained ? icon("check") : ""}
         </button>`;
@@ -1796,8 +2473,16 @@
     }
 
     if ($("#detailDialog").open && ui.detail.image && ui.detail.image.url === image.url) {
-      if (!ui.detail.boardId && ui.view.name === "board") ui.detail.boardId = result.board.id;
-      renderDetail();
+      if (!ui.detail.boardId) {
+        ui.detail.boardId = result.board.id;
+        ui.detail.boardTags = (result.board.tags || []).slice(0, 10);
+        ui.detail.boardRelated = [];
+        ui.detail.boardLoading = ui.detail.boardTags.length > 0;
+        renderDetail();
+        loadDetailBoardRelated(ui.detail.token);
+      } else {
+        renderDetail();
+      }
     }
 
     const boardId = result.board.id;
@@ -1817,7 +2502,8 @@
   }
 
   function quickSave(boardId, image) {
-    const result = addPinToBoard(boardId, image, ui.view.name === "search" ? ui.view.query : "");
+    const targetId = boardId || ensureLikesBoard().id;
+    const result = addPinToBoard(targetId, image, ui.view.name === "search" ? ui.view.query : "");
     afterSave(result, image);
   }
 
@@ -1829,6 +2515,10 @@
     const mode = options.mode === "edit" ? "edit" : "create";
     const board = mode === "edit" ? boardById(options.boardId) : null;
     if (mode === "edit" && !board) return;
+    if (mode === "edit" && board.system === "likes") {
+      showToast("Likes is the default board and keeps its name.");
+      return;
+    }
 
     ui.boardDialog = {
       mode,
@@ -1864,6 +2554,12 @@
 
   function submitBoardForm(event) {
     event.preventDefault();
+    const editing = ui.boardDialog.mode === "edit" ? boardById(ui.boardDialog.boardId) : null;
+    if (editing && editing.system === "likes") {
+      showToast("Likes is the default board and keeps its name.");
+      $("#boardDialog")?.close();
+      return;
+    }
     const nameInput = $("#boardNameInput");
     const seedInput = $("#boardSeedInput");
     const name = cleanText(nameInput ? nameInput.value : "", 80);
@@ -1875,6 +2571,11 @@
     if (ui.boardDialog.mode === "edit") {
       const board = boardById(ui.boardDialog.boardId);
       if (!board) return;
+      if (board.system === "likes") {
+        $("#boardDialog").close();
+        showToast("Likes is the default board and keeps its name.");
+        return;
+      }
       board.name = name;
       board.updatedAt = nowIso();
       persist();
@@ -1889,9 +2590,11 @@
     const board = {
       id: uid(),
       name,
+      privacy: "public",
       createdAt: nowIso(),
       updatedAt: nowIso(),
       seeds: [],
+      tags: [],
       pins: [],
     };
     if (seed) addSeed(board, seed);
@@ -1917,9 +2620,31 @@
     }
   }
 
+  function toggleBoardPrivacy() {
+    const board = boardById(ui.view.boardId);
+    if (!board) return;
+    board.privacy = board.privacy === "private" ? "public" : "private";
+    board.updatedAt = nowIso();
+    persist();
+    ui.feed.sig = "";
+    ui.feed.error = "";
+    ui.boardRelated.sig = "";
+    renderSidebar();
+    render();
+    showToast(
+      board.privacy === "private"
+        ? `“${board.name}” is private. Its tags will stay out of the field.`
+        : `“${board.name}” is public. Its tags can shape the field again.`
+    );
+  }
+
   function deleteCurrentBoard() {
     const board = boardById(ui.view.boardId);
     if (!board) return;
+    if (board.system === "likes") {
+      showToast("Likes is the default board and cannot be deleted.");
+      return;
+    }
     const message = `Delete “${board.name}” and its ${board.pins.length} saved link${
       board.pins.length === 1 ? "" : "s"
     }? This only affects this browser.`;
@@ -2155,6 +2880,23 @@
         }
         return json?.resource_response || {};
       };
+      const stop = new Set(
+        "a an and are as at be by for from has have in into is it its of on or the their them then there these this to was were with you your image images photo photos picture pictures pin pins".split(" ")
+      );
+      const addTag = (list, seen, value) => {
+        if (value && typeof value === "object") {
+          value = value.name || value.tag || value.title || value.display_name || "";
+        }
+        const tag = text(value, 40)
+          .replace(/^#+/, "")
+          .replace(/[\s_]+/g, " ")
+          .trim()
+          .toLowerCase();
+        if (tag.length < 2 || tag.length > 40 || seen.has(tag) || stop.has(tag)) return;
+        if (!/[a-z\u00c0-\u024f]/i.test(tag)) return;
+        seen.add(tag);
+        list.push(tag);
+      };
       const mapPin = (raw, board) => {
         if (!raw || typeof raw !== "object") return null;
         if (raw.type && raw.type !== "pin") return null;
@@ -2182,25 +2924,88 @@
         if (!full) return null;
         const thumb = pick("736x", "564x", "474x", "236x") || full;
         const pinner = raw.pinner && typeof raw.pinner === "object" ? raw.pinner : {};
+        const native = raw.native_creator && typeof raw.native_creator === "object" ? raw.native_creator : {};
         const creator = text(pinner.username, 60)
           ? `@${text(pinner.username, 60)}`
-          : text(pinner.full_name, 100) || "Pinterest";
+          : text(native.username, 60)
+            ? `@${text(native.username, 60)}`
+            : text(pinner.full_name || native.full_name, 100) || "Pinterest";
+        const rich = raw.rich_summary && typeof raw.rich_summary === "object" ? raw.rich_summary : {};
+        const link =
+          /^https?:\/\//i.test(String(raw.link || "")) && !/pinterest\./i.test(String(raw.link))
+            ? String(raw.link)
+            : "";
+        const richUrl =
+          /^https?:\/\//i.test(String(rich.url || "")) && !/pinterest\./i.test(String(rich.url))
+            ? String(rich.url)
+            : "";
+        const sourcePage = link || richUrl;
+        const description = text(
+          raw.description || raw.unauth_on_page_description || rich.display_description,
+          600
+        );
         const title =
-          text(raw.title || raw.grid_title || raw.description || raw.alt_text, 240) ||
+          text(raw.title || raw.grid_title || description || raw.alt_text || raw.auto_alt_text, 240) ||
           `${text(board.name, 60) || "Pinterest"} pin`;
+        const domain =
+          text(raw.domain, 80) && !/^uploaded by user$/i.test(text(raw.domain, 80))
+            ? text(raw.domain, 80)
+            : text(rich.site_name, 80);
+        const tags = [];
+        const seenTags = new Set();
+        for (const list of [raw.visual_annotation, raw.manual_interest_tags, raw.tags]) {
+          if (Array.isArray(list)) list.forEach((tag) => addTag(tags, seenTags, tag));
+        }
+        const tagText = [raw.description, raw.title, raw.auto_alt_text, raw.alt_text].filter(Boolean).join(" ");
+        for (const match of String(tagText).matchAll(/#([\p{L}\p{N}_-]{2,40})/gu)) {
+          addTag(tags, seenTags, match[1]);
+        }
+        if (!tags.length) {
+          for (const word of text(tagText, 1200).toLowerCase().split(/[^\p{L}\p{N}-]+/u)) {
+            addTag(tags, seenTags, word);
+            if (tags.length >= 8) break;
+          }
+        }
+        const meta = {
+          pinId: text(raw.id, 80),
+          boardId: text(board.id, 80),
+          boardName: text(board.name, 80),
+          domain,
+          link: sourcePage,
+          linkDomain: text(raw.link_domain, 80),
+          boardPrivacy: text(board.privacy, 40),
+          altText: text(raw.alt_text || raw.auto_alt_text, 300),
+          siteName: text(rich.site_name, 80),
+          siteUrl: richUrl,
+          siteDescription: text(rich.display_description, 500),
+          richType: text(rich.type_name, 40),
+          createdAt: text(raw.created_at, 60),
+          visualTags: Array.isArray(raw.visual_annotation)
+            ? raw.visual_annotation.map((tag) => text(tag, 40)).filter(Boolean).join(", ")
+            : "",
+          interestTags: Array.isArray(raw.manual_interest_tags)
+            ? raw.manual_interest_tags.map((tag) => text(tag, 40)).filter(Boolean).join(", ")
+            : "",
+        };
         return {
           url: full.url,
           thumb: thumb.url,
           title,
           creator,
           license: "Pinterest",
-          source: "Pinterest",
+          source: domain || "Pinterest",
+          sourcePage: sourcePage || pinUrl(raw.id),
+          foreignLandingUrl: sourcePage || pinUrl(raw.id),
+          pinUrl: pinUrl(raw.id),
+          domain,
           provider: "pinterest",
-          foreignLandingUrl: pinUrl(raw.id),
           openverseId: "",
+          description,
           width: full.width,
           height: full.height,
-          tags: [],
+          tags: tags.slice(0, 32),
+          publishedAt: raw.created_at || "",
+          meta,
           savedAt: new Date().toISOString(),
         };
       };
@@ -2480,6 +3285,484 @@
     window.open(`https://www.pinterest.com/${encodeURIComponent(username)}/`, "_blank", "noopener");
   }
 
+  function webCaptureScraper(config) {
+    const cfg = config || {};
+    const host = location.hostname.replace(/^www\./, "");
+    const engine =
+      host.includes("duckduckgo") ? "duckduckgo" :
+      host.includes("brave") ? "brave" :
+      host.includes("qwant") ? "qwant" :
+      host.includes("startpage") ? "startpage" :
+      host.includes("bing") ? "bing" :
+      host.includes("ecosia") ? "ecosia" :
+      host.includes("mojeek") ? "mojeek" : "web";
+    const labels = {
+      duckduckgo: "DuckDuckGo",
+      brave: "Brave Search",
+      qwant: "Qwant",
+      startpage: "Startpage",
+      bing: "Bing Images",
+      ecosia: "Ecosia",
+      mojeek: "Mojeek",
+      web: host || "Web",
+    };
+    const label = labels[engine] || host || "Web";
+    const params = new URLSearchParams(location.search);
+    const query = ["q", "query", "text", "search"]
+      .map((key) => params.get(key))
+      .find((value) => value && value.trim()) || document.title.replace(/\s*[-–|].*$/, "").trim();
+    const clean = (value, max) =>
+      String(value == null ? "" : value).replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, max || 300);
+    const decode = (value) => {
+      const raw = clean(value, 4000);
+      if (!raw) return "";
+      try {
+        const url = new URL(raw, location.href);
+        if (/(^|\.)duckduckgo\.com$/i.test(url.hostname) && /\/iu\//.test(url.pathname)) {
+          const original = url.searchParams.get("u");
+          if (original && /^https?:\/\//i.test(original)) return original;
+        }
+        return /^https?:\/\//i.test(url.href) ? url.href : "";
+      } catch {
+        return "";
+      }
+    };
+    const engineHost = (name) => {
+      const h = String(name || "").toLowerCase().replace(/^www\./, "");
+      return h === host || h.endsWith("." + host) || host.endsWith("." + h);
+    };
+    const pageFor = (value) => {
+      const raw = clean(value, 4000);
+      if (!raw) return "";
+      try {
+        const url = new URL(raw, location.href);
+        if (engineHost(url.hostname)) {
+          for (const key of ["uddg", "url", "u", "q", "imgurl"]) {
+            const target = url.searchParams.get(key);
+            if (target && /^https?:\/\//i.test(target)) return target;
+          }
+          return "";
+        }
+        return /^https?:\/\//i.test(url.href) ? url.href : "";
+      } catch {
+        return "";
+      }
+    };
+    const skip = /(?:logo|favicon|sprite|avatar|icon|spacer|pixel|transparent|blank|badge|button|loading)/i;
+    const imageSrc = (img) =>
+      img.dataset.src ||
+      img.dataset.original ||
+      img.getAttribute("data-lazy-src") ||
+      img.currentSrc ||
+      img.src ||
+      "";
+    const stop = new Set(
+      "a an and are as at be by for from has have in into is it its of on or the their them then there these this to was were with you your image images photo photos picture pictures search results result".split(" ")
+    );
+    const items = [];
+    const seen = new Set();
+    const add = (raw) => {
+      if (!raw) return;
+      let image = decode(raw.image);
+      if (!image || skip.test(image)) return;
+      if (seen.has(image)) return;
+      const page = pageFor(raw.page);
+      let domain = "";
+      try {
+        domain = new URL(page || image).hostname.replace(/^www\./, "");
+      } catch {
+        domain = "";
+      }
+      const title = clean(raw.title || raw.alt || raw.description || query || "Web image", 240);
+      const description = clean(raw.description, 600);
+      const tagSource = [query, title, raw.alt, description].filter(Boolean).join(" ");
+      const tags = [];
+      const seenTags = new Set();
+      for (const token of tagSource.toLowerCase().split(/[^\p{L}\p{N}-]+/u)) {
+        const tag = token.replace(/^-+|-+$/g, "").slice(0, 40);
+        if (tag.length < 3 || stop.has(tag) || seenTags.has(tag)) continue;
+        if (!/[a-z\u00c0-\u024f]/i.test(tag)) continue;
+        seenTags.add(tag);
+        tags.push(tag);
+        if (tags.length >= 12) break;
+      }
+      seen.add(image);
+      items.push({
+        url: image,
+        thumb: decode(raw.thumb) || image,
+        title,
+        creator: domain || label,
+        license: "See source",
+        source: label,
+        sourcePage: page || image,
+        foreignLandingUrl: page || image,
+        domain,
+        provider: "web",
+        engine,
+        description,
+        width: Number(raw.width) || 0,
+        height: Number(raw.height) || 0,
+        tags,
+        meta: {
+          engine,
+          query,
+          resultPage: location.href,
+          pageTitle: clean(document.title, 160),
+          capturedAt: new Date().toISOString(),
+        },
+      });
+    };
+
+    document.querySelectorAll("a.iusc").forEach((anchor) => {
+      try {
+        const data = JSON.parse(anchor.getAttribute("m") || "{}");
+        add({
+          image: data.murl,
+          thumb: data.turl,
+          page: data.purl,
+          title: data.t,
+          description: data.desc,
+        });
+      } catch {
+        /* not a Bing image card */
+      }
+    });
+
+    document.querySelectorAll("a[href] img").forEach((img) => {
+      const anchor = img.closest("a[href]");
+      if (!anchor) return;
+      const width = img.naturalWidth || img.width || 0;
+      const height = img.naturalHeight || img.height || 0;
+      if (width && height && width < 60 && height < 60) return;
+      add({
+        image: imageSrc(img),
+        thumb: imageSrc(img),
+        page: anchor.href,
+        title: img.alt || anchor.getAttribute("aria-label") || anchor.title,
+        width,
+        height,
+      });
+    });
+
+    document.querySelectorAll("img").forEach((img) => {
+      const width = img.naturalWidth || img.width || 0;
+      const height = img.naturalHeight || img.height || 0;
+      if (width && height && width < 100 && height < 100) return;
+      add({
+        image: imageSrc(img),
+        thumb: imageSrc(img),
+        page: img.closest("a[href]") ? img.closest("a[href]").href : "",
+        title: img.alt,
+        width,
+        height,
+      });
+    });
+
+    document.querySelectorAll('[style*="background-image"]').forEach((element) => {
+      const match = /url\(["']?([^"')]+)["']?\)/i.exec(element.getAttribute("style") || "");
+      if (!match) return;
+      const anchor = element.closest("a[href]");
+      add({
+        image: match[1],
+        thumb: match[1],
+        page: anchor ? anchor.href : "",
+        title:
+          element.getAttribute("aria-label") ||
+          element.getAttribute("title") ||
+          (anchor ? anchor.getAttribute("aria-label") || anchor.title : ""),
+      });
+    });
+
+    if (!items.length) {
+      alert("No image results were found on this page. Open an image search tab, wait for thumbnails to load, then run the absorber again.");
+      return;
+    }
+
+    const token = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const target =
+      cfg.siftUrl +
+      "?web-capture=" + encodeURIComponent(token) +
+      "&web-source=" + encodeURIComponent(engine) +
+      "&web-query=" + encodeURIComponent(clean(query, 180));
+    const popup = window.open(target, "_blank");
+    if (!popup) {
+      alert("Sift could not open a new tab. Allow pop-ups for this search engine and try again.");
+      return;
+    }
+
+    const message = {
+      type: "sift:web-data",
+      token,
+      payload: {
+        engine,
+        query: clean(query, 180),
+        pageUrl: location.href,
+        capturedAt: new Date().toISOString(),
+        items: items.slice(0, 180),
+      },
+    };
+    let tries = 0;
+    const send = () => {
+      try {
+        popup.postMessage(message, cfg.siftOrigin || "*");
+      } catch {
+        /* the receiver may have closed */
+      }
+    };
+    send();
+    const timer = setInterval(() => {
+      send();
+      tries += 1;
+      if (tries >= 20) clearInterval(timer);
+    }, 750);
+  }
+
+  function webCaptureBookmarkletCode() {
+    const config = {
+      siftUrl: location.origin + location.pathname,
+      siftOrigin: location.origin,
+    };
+    return `javascript:(${webCaptureScraper.toString()})(${JSON.stringify(config)});void 0`;
+  }
+
+  function updateWebCaptureBookmarklet() {
+    const link = $("#webCaptureBookmarklet");
+    if (!link) return;
+    if (!/^https?:$/.test(location.protocol)) {
+      link.removeAttribute("href");
+      link.dataset.bookmarklet = "";
+      link.setAttribute("aria-disabled", "true");
+      return;
+    }
+    const code = webCaptureBookmarkletCode();
+    link.href = code;
+    link.dataset.bookmarklet = code;
+    link.removeAttribute("aria-disabled");
+  }
+
+  function renderWebCaptureHelp() {
+    const body = $("#webCaptureBody");
+    if (!body) return;
+    const engine = ui.webCapture.engine;
+    const spec = WEB_ENGINES[engine];
+    const query = ui.webCapture.query || ui.search.query || ui.lastQuery;
+    body.innerHTML = `
+      <p class="dialog-lede">Search engines do not allow a static page to read their image results directly. This absorber reads only the images already displayed in one engine tab when you click it.</p>
+      <div class="capture-steps">
+        <div class="capture-step">
+          <span class="capture-num">1</span>
+          <div><h3>Put the absorber in your bookmarks bar</h3><p>Drag this button to the bar. If the bar is hidden, show it with your browser's bookmark settings.</p>
+            <div class="capture-actions">
+              <a class="btn btn-primary" id="webCaptureBookmarklet" href="#" draggable="true">Absorb image tab</a>
+              <button class="btn btn-quiet" type="button" data-action="web-capture-copy">Copy code</button>
+            </div>
+          </div>
+        </div>
+        <div class="capture-step">
+          <span class="capture-num">2</span>
+          <div><h3>Open an image tab</h3><p>${spec ? `${esc(spec.label)} is ready.` : "Choose an engine."} Search images for the phrase below, then wait for the thumbnails to appear.</p>
+            <label class="field compact"><span>Image search phrase</span><input id="webCaptureQuery" type="search" maxlength="180" autocomplete="off" spellcheck="false" value="${esc(
+              query
+            )}" placeholder="e.g. mossy forest"></label>
+            <div class="engine-grid">${Object.entries(WEB_ENGINES)
+              .map(
+                ([key, item]) => `<button class="btn btn-quiet btn-small" type="button" data-action="engine-tab" data-engine="${esc(
+                  key
+                )}">${esc(item.label)}</button>`
+              )
+              .join("")}</div>
+          </div>
+        </div>
+        <div class="capture-step">
+          <span class="capture-num">3</span>
+          <div><h3>Click “Absorb image tab” on that engine page</h3><p>Sift opens a receiver, stores every displayed image link and its available metadata, and shows the absorbed set. Nothing is uploaded.</p></div>
+        </div>
+      </div>
+      <p class="dialog-note">Only visible thumbnails are absorbed. Scroll the engine results first if you want more. The absorber never reads another site's cookies or private data.</p>`;
+    updateWebCaptureBookmarklet();
+  }
+
+  function openWebCaptureHelp() {
+    const dialog = $("#webCaptureDialog");
+    if (!dialog) return;
+    $("#settingsDialog")?.close();
+    renderWebCaptureHelp();
+    if (!dialog.open) dialog.showModal();
+  }
+
+  async function copyWebCaptureBookmarklet() {
+    updateWebCaptureBookmarklet();
+    const code = $("#webCaptureBookmarklet")?.dataset.bookmarklet || "";
+    if (!code) {
+      showToast("The absorber needs Sift served over http or https.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(code);
+      showToast("Absorber copied. Paste it as a bookmark URL.");
+    } catch {
+      showToast("Copy was blocked. Drag the button to your bookmarks bar instead.");
+    }
+  }
+
+  function openWebEngine(engine, rawQuery) {
+    const spec = WEB_ENGINES[engine];
+    const query = cleanText(rawQuery || $("#webCaptureQuery")?.value || ui.search.query || ui.lastQuery, 180);
+    if (!spec) return;
+    if (!query) {
+      showToast("Enter an image search phrase first.");
+      $("#webCaptureQuery")?.focus();
+      return;
+    }
+    ui.webCapture.engine = engine;
+    ui.webCapture.query = query;
+    const popup = window.open(spec.url(query), "_blank");
+    if (!popup) {
+      showToast("Allow pop-ups to open an image-search tab.", { duration: 6000 });
+      return;
+    }
+    try {
+      popup.opener = null;
+    } catch {
+      /* the engine tab may already be cross-origin */
+    }
+    openWebCaptureHelp();
+    showToast(`${spec.label} opened. Click the absorber there to bring its images into Sift.`, {
+      duration: 7000,
+    });
+  }
+
+  function webEngineForHost(rawHost) {
+    const host = String(rawHost || "").toLowerCase().replace(/^www\./, "");
+    for (const [key, spec] of Object.entries(WEB_ENGINES)) {
+      if (spec.hosts.some((candidate) => host === candidate || host.endsWith("." + candidate))) {
+        return key;
+      }
+    }
+    return "";
+  }
+
+  function sanitizeWebPayload(raw, fallbackEngine = "") {
+    const source = raw && typeof raw === "object" ? raw : {};
+    const engine = WEB_ENGINES[source.engine] ? source.engine : WEB_ENGINES[fallbackEngine] ? fallbackEngine : "";
+    const items = [];
+    const seen = new Set();
+    for (const rawItem of Array.isArray(source.items) ? source.items.slice(0, 180) : []) {
+      const pin = sanitizePin({
+        ...rawItem,
+        provider: "web",
+        engine,
+        source: engine ? WEB_ENGINES[engine].label : rawItem.source,
+        license: "See source",
+      });
+      if (!pin || seen.has(pin.url)) continue;
+      seen.add(pin.url);
+      items.push(pin);
+    }
+    return {
+      engine,
+      query: cleanText(source.query, 180),
+      pageUrl: safeUrl(source.pageUrl) || "",
+      items,
+    };
+  }
+
+  function absorbWebPayload(payload) {
+    const clean = sanitizeWebPayload(payload, ui.webCapture.engine);
+    if (!clean.items.length) {
+      showToast("No usable image links arrived. Scroll the image tab and try the absorber again.");
+      return;
+    }
+    for (const item of clean.items) addToDisplayBuffer(item);
+    const label = clean.engine ? WEB_ENGINES[clean.engine].label : "web";
+    const query = clean.query || ui.webCapture.query || "web images";
+    ui.search = {
+      token: ui.search.token + 1,
+      controller: null,
+      query,
+      items: clean.items,
+      page: 1,
+      pageCount: 1,
+      total: clean.items.length,
+      loading: false,
+      error: "",
+      notice: `Absorbed ${clean.items.length} displayed link${clean.items.length === 1 ? "" : "s"} from ${label}.`,
+      source: label,
+    };
+    ui.webCapture.waiting = false;
+    $("#webCaptureDialog")?.close();
+    try {
+      history.replaceState({}, "", location.pathname + location.hash);
+    } catch {
+      /* ignore */
+    }
+    ui.view = { name: "search", query };
+    setSearchInputs(query);
+    render();
+    showToast(`${clean.items.length} links absorbed and kept in the display buffer.`, {
+      duration: 6000,
+    });
+  }
+
+  function initWebCaptureReceiver() {
+    const params = new URLSearchParams(location.search);
+    const token = params.get("web-capture");
+    if (!token) return false;
+    const engine = params.get("web-source") || "";
+    const query = params.get("web-query") || "";
+    ui.webCapture = {
+      token,
+      engine: WEB_ENGINES[engine] ? engine : "",
+      query: cleanText(query, 180),
+      waiting: true,
+    };
+    const dialog = $("#webCaptureDialog");
+    const body = $("#webCaptureBody");
+    if (body) {
+      body.innerHTML = `<div class="capture-waiting"><div class="loading-copy">Listening for the absorbed image tab…</div><p class="dialog-note">Keep the search tab open for a moment. Sift will show the links here as soon as they arrive.</p><button class="btn btn-quiet btn-small" type="button" data-close>Close receiver</button></div>`;
+    }
+    if (dialog && !dialog.open) dialog.showModal();
+    window.setTimeout(() => {
+      if (ui.webCapture.waiting) {
+        const waiting = $(".capture-waiting");
+        if (waiting) {
+          waiting.innerHTML = `<p class="dialog-note">Still listening. Return to the search-engine tab and click the absorber again. If the Sift tab was blocked, allow pop-ups and retry.</p><button class="btn btn-quiet btn-small" type="button" data-close>Close receiver</button>`;
+        }
+      }
+    }, 18000);
+
+    const onMessage = (event) => {
+      if (!event.data || event.data.type !== "sift:web-data") return;
+      if (event.data.token !== token) return;
+      let originHost = "";
+      try {
+        originHost = new URL(event.origin).hostname;
+      } catch {
+        return;
+      }
+      const originEngine = webEngineForHost(originHost);
+      if (!originEngine) return;
+      const payload = event.data.payload || {};
+      if (!WEB_ENGINES[payload.engine]) payload.engine = originEngine;
+      absorbWebPayload(payload);
+      window.removeEventListener("message", onMessage);
+    };
+    window.addEventListener("message", onMessage);
+    dialog?.addEventListener(
+      "close",
+      () => {
+        window.removeEventListener("message", onMessage);
+        try {
+          history.replaceState({}, "", location.pathname + location.hash);
+        } catch {
+          /* ignore */
+        }
+      },
+      { once: true }
+    );
+    return true;
+  }
+
   function sanitizePinterestPayload(raw, fallbackUsername = "") {
     const source = raw && typeof raw === "object" ? raw : {};
     const username = normalizePinterestUsername(source.username) || fallbackUsername;
@@ -2499,7 +3782,7 @@
         const pin = sanitizePin({
           ...rawPin,
           provider: "pinterest",
-          source: "Pinterest",
+          source: rawPin.source || "Pinterest",
           license: "Pinterest",
         });
         if (!pin || seenPins.has(pin.url)) continue;
@@ -2653,9 +3936,11 @@
         board = {
           id: uid(),
           name: imported.name,
+          privacy: imported.privacy === "public" ? "public" : "private",
           createdAt: nowIso(),
           updatedAt: nowIso(),
           seeds: [],
+          tags: [],
           origin: { provider: "pinterest", boardId: imported.id, username },
           pins: [],
         };
@@ -2666,6 +3951,7 @@
         if (!board.origin) {
           board.origin = { provider: "pinterest", boardId: imported.id, username };
         }
+        if (imported.privacy !== "public") board.privacy = "private";
       }
 
       const seenPins = new Set(board.pins.map((pin) => pin.url));
@@ -2683,6 +3969,7 @@
         added += 1;
       }
       addSeed(board, imported.name);
+      rebuildBoardTags(board);
       board.updatedAt = nowIso();
     }
 
@@ -2840,6 +4127,8 @@
     $("#saveDialog")?.close();
     $("#pinterestDialog")?.close();
     $("#pinterestReceiveDialog")?.close();
+    $("#webCaptureDialog")?.close();
+    clearDisplayBuffer();
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch {
@@ -3024,6 +4313,23 @@
       case "pinterest-import":
         importSelectedPinterest();
         return true;
+      case "web-capture-help":
+        openWebCaptureHelp();
+        return true;
+      case "web-capture-copy":
+        copyWebCaptureBookmarklet();
+        return true;
+      case "engine-tab":
+        openWebEngine(
+          element.dataset.engine || "",
+          element.dataset.query || $("#webCaptureQuery")?.value || ""
+        );
+        return true;
+      case "clear-buffer":
+        clearWebBuffer();
+        if (ui.view.name === "search") renderSearch();
+        showToast("Captured web links cleared from the buffer.");
+        return true;
       case "erase":
         eraseEverything();
         return true;
@@ -3040,9 +4346,7 @@
       case "save": {
         const image = resolveImage(element.dataset.url);
         if (!image) return true;
-        const boardId = element.dataset.boardId || "";
-        if (boardId) quickSave(boardId, image);
-        else openSaveDialog(image);
+        quickSave(element.dataset.boardId || "", image);
         return true;
       }
       case "save-to-board": {
@@ -3079,6 +4383,10 @@
       case "delete-board":
         closeBoardMenu();
         deleteCurrentBoard();
+        return true;
+      case "toggle-board-privacy":
+        closeBoardMenu();
+        toggleBoardPrivacy();
         return true;
       case "board-menu": {
         const menu = element.nextElementSibling;
@@ -3203,7 +4511,9 @@
     }
     summary.textContent = `${state.boards.length} board${
       state.boards.length === 1 ? "" : "s"
-    } · ${pins} image link${pins === 1 ? "" : "s"} · about ${formatBytes(bytes)} stored locally.`;
+    } · ${pins} image link${pins === 1 ? "" : "s"} · ${displayBuffer.size} buffered · about ${formatBytes(
+      bytes
+    )} stored locally.`;
   }
 
   /* ---------------------------------------------------------------------
@@ -3245,6 +4555,7 @@
     if (search) {
       event.preventDefault();
       closeBoardMenu();
+      search.closest("dialog")?.close();
       performSearch(search.dataset.search);
       return;
     }
@@ -3399,6 +4710,17 @@
     });
 
     window.addEventListener("storage", (event) => {
+      if (event.key === BUFFER_KEY) {
+        const before = displayBuffer.size;
+        displayBuffer = loadDisplayBuffer();
+        if (ui.view.name === "search") renderSearch();
+        if (displayBuffer.size > before) {
+          const dialog = $("#webCaptureDialog");
+          if (dialog?.open && !ui.webCapture.waiting) dialog.close();
+          showToast("New displayed links arrived in the buffer.", { duration: 5000 });
+        }
+        return;
+      }
       if (event.key !== STORAGE_KEY) return;
       state = loadState();
       applyTheme();
@@ -3439,6 +4761,7 @@
         if (dialog.id === "saveDialog") resetSaveDialog();
         if (dialog.id === "boardDialog") resetBoardDialog();
         if (dialog.id === "detailDialog") ui.detail.token += 1;
+        if (dialog.id === "webCaptureDialog") ui.webCapture.waiting = false;
       });
     });
 
@@ -3459,7 +4782,7 @@
       window.setTimeout(() => showToast(bootNotice, { duration: 8000 }), 350);
     }
 
-    initPinterestReceiver();
+    if (!initPinterestReceiver()) initWebCaptureReceiver();
   }
 
   init();

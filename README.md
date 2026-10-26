@@ -2,7 +2,7 @@
 
 **Live:** https://orbitmechanic.github.io/sift/
 
-A private, ad-free image board. Search openly licensed images, save only their links, bring your Pinterest boards across, and grow a feed from the things you chose.
+A private, ad-free image board. Search openly licensed images, absorb the image tab of a web search, save only links and metadata, bring Pinterest boards across, and grow a feed from the tags you actually keep.
 
 Sift is a static site: HTML, CSS, and vanilla JavaScript with no build step, no framework, and no backend.
 
@@ -49,14 +49,18 @@ Everything is local to the browser. The archive is saved under the `localStorage
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "boards": [
     {
       "id": "board-id",
       "name": "Moss Study",
+      "privacy": "public",
       "createdAt": "2026-10-24T12:00:00.000Z",
       "updatedAt": "2026-10-24T12:00:00.000Z",
       "seeds": ["mossy forest"],
+      "tags": [
+        { "value": "moss", "count": 4, "lastUsedAt": "2026-10-24T12:01:00.000Z" }
+      ],
       "pins": [
         {
           "url": "https://example.org/image.jpg",
@@ -64,12 +68,20 @@ Everything is local to the browser. The archive is saved under the `localStorage
           "title": "Mossy forest",
           "creator": "Example",
           "license": "CC BY",
+          "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
           "source": "flickr",
-          "provider": "openverse",
+          "sourcePage": "https://example.org/source-page",
           "foreignLandingUrl": "https://example.org/source-page",
+          "pinUrl": "",
+          "domain": "example.org",
+          "engine": "",
+          "provider": "openverse",
+          "description": "Moss on a forest floor.",
           "width": 1024,
           "height": 685,
           "tags": ["forest", "moss"],
+          "publishedAt": "2026-10-20T09:00:00.000Z",
+          "meta": { "license": "by", "source": "flickr" },
           "savedAt": "2026-10-24T12:01:00.000Z"
         }
       ]
@@ -81,7 +93,9 @@ Everything is local to the browser. The archive is saved under the `localStorage
 }
 ```
 
-Pins contain image URLs and small metadata. Sift never downloads image files into the archive and never stores base64 image data. The `provider` field is one of `openverse`, `wikimedia`, `pinterest`, or `manual`.
+Pins contain image URLs and metadata. Sift never downloads image files into the archive and never stores base64 image data. The `provider` field is one of `openverse`, `wikimedia`, `pinterest`, `manual`, or `web`.
+
+A separate `sift.buffer.v1` key holds the displayed-link buffer: links seen in search results, captured web image tabs, or opened pins. It keeps up to 600 sanitized links and is a convenience, not the archive.
 
 Boards imported from Pinterest also carry an optional origin, used to recognize the same board on a later import:
 
@@ -92,6 +106,14 @@ Boards imported from Pinterest also carry an optional origin, used to recognize 
   "username": "pinterest"
 }
 ```
+
+## Tags, Likes, and privacy
+
+- Every saved pin keeps up to 32 normalized tags. Board tags are rebuilt from its pins and ordered by frequency plus recency.
+- The default **Likes** board receives quick saves that do not name another board. It cannot be renamed or deleted.
+- The field uses the most frequent and recent tags across public boards. Private-board pins and tags are excluded.
+- Board pages use their own tag list to suggest more images. A pin's detail view shows an image-tag mini-feed first, then the board-tag mini-feed.
+- Mark a board private from its menu. Private boards remain fully usable; they just stay out of the shared feed and global tag profile.
 
 ## Pinterest import
 
@@ -110,25 +132,39 @@ The importer:
 - Reads the board list and every page of each board's pins.
 - Merges into an existing board with the same Pinterest origin, then the same name.
 - Skips image links that are already on the board.
+- Keeps the pin's title, description, creator, Pinterest pin URL, true external source page, domain, dimensions, date, visual tags, interest tags, and rich-summary fields when Pinterest exposes them.
 - Caps imports at 200 boards and 5,000 links per board. The preview lets you deselect boards if the archive is too large for this browser's storage.
 - Sends normalized data directly to the Sift tab with `postMessage`, guarded by a one-time token and a Pinterest origin check. No Sift server, Pinterest password, or Pinterest cookie is involved.
 
 Pinterest's internal web endpoints are unofficial and may change. If an import stops working, Pinterest may have changed its response format or blocked the request.
 
+## Web image capture
+
+Search engines do not send `Access-Control-Allow-Origin` for their image-result APIs, so a static page cannot fetch them directly. Openverse and Wikimedia Commons do allow direct search; the other engines need a deliberate click.
+
+1. Search in Sift, then choose **DuckDuckGo**, **Brave Search**, **Qwant**, **Startpage**, **Bing Images**, **Ecosia**, or **Mojeek** from the source strip.
+2. Install the **Absorb image tab** bookmarklet once by dragging it to your bookmarks bar.
+3. On the engine's image tab, wait for thumbnails, then click the absorber.
+4. Sift opens a receiver, stores every displayed image link and its available metadata, and shows the absorbed set.
+
+The absorber reads only images already displayed on that page. It does not read cookies, private data, or results behind a login. Links land in the displayed-link buffer and can be saved to any board. Some engines may block pop-ups or isolate the opened tab; allow pop-ups for the engine and retry. The absorber retries its hand-off for about 15 seconds.
+
 ## Privacy
 
 - No accounts, analytics, cookies, tracking pixels, or third-party scripts.
-- Search queries are sent directly from the browser to Openverse, with Wikimedia Commons as a fallback.
+- Search queries are sent directly from the browser to Openverse and Wikimedia Commons.
 - Search history stays in memory only and is discarded on reload.
 - Images load from their original hosts. Those hosts can see your IP address; `no-referrer` prevents them from receiving the page URL.
 - Pinterest import is optional and stays in the browser. The bookmarklet reads Pinterest using your current Pinterest session and hands normalized data to Sift; Sift never receives your Pinterest credentials.
-- Export your boards as JSON at any time. Erasing site data removes the archive permanently.
+- Web image capture is optional and runs only when you click the absorber on an image-search tab. It writes displayed links to this browser's buffer; nothing passes through a Sift server.
+- Export your boards as JSON at any time. Erasing site data removes the archive and buffer permanently.
 
 ## Image sources
 
-- [Openverse](https://openverse.org) is the primary search source.
-- [Wikimedia Commons](https://commons.wikimedia.org) is the fallback.
-- Related images use Openverse's related-image endpoint when an Openverse image ID is available.
+- [Openverse](https://openverse.org) is the primary direct search source.
+- [Wikimedia Commons](https://commons.wikimedia.org) is the direct fallback and second search source.
+- Web image tabs for DuckDuckGo, Brave Search, Qwant, Startpage, Bing Images, Ecosia, and Mojeek are read through the displayed-image-tab absorber.
+- Related images use the saved pin's tags, then Openverse's related-image endpoint when an Openverse image ID is available.
 - Pinterest imports only image URLs and metadata from pins. Sift does not grant rights to those images; check the original pin before reusing one.
 
 Openverse anonymous API limits apply (currently 20 requests per minute and 200 per day, with a separate thumbnail limit). If Openverse is unavailable or rate-limited, Sift falls back to Wikimedia Commons. Check the license on each original source page before reusing an image.
