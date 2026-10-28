@@ -4,6 +4,10 @@
 
   const STORAGE_KEY = "sift.v1";
   const BUFFER_KEY = "sift.buffer.v1";
+  const DB_NAME = "sift.db";
+  const DB_VERSION = 1;
+  const DB_STORE = "archive";
+  const DB_KEY = "archive";
   const VERSION = 2;
   const PAGE_SIZE = 20;
   const MAX_BOARDS = 200;
@@ -14,7 +18,9 @@
   const MAX_BOARD_TAGS = 80;
   const MAX_MASTER_TAGS = 80;
   const MAX_BUFFER = 600;
-  const FEED_LIMIT = 56;
+  const FEED_BATCH = 36;
+  const FEED_MAX_ATTEMPTS = 4;
+  const BOARD_PAGE_SIZE = 60;
   const API_BASE = "https://api.openverse.org/v1";
   const WIKI_API = "https://commons.wikimedia.org/w/api.php";
   const LIKES_ID = "likes";
@@ -84,6 +90,76 @@
     if (crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID();
     return "b_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
   };
+
+  let archiveDbPromise = null;
+
+  function openArchiveDb() {
+    if (!("indexedDB" in window)) return Promise.resolve(null);
+    if (archiveDbPromise) return archiveDbPromise;
+    archiveDbPromise = new Promise((resolve) => {
+      let request;
+      try {
+        request = indexedDB.open(DB_NAME, DB_VERSION);
+      } catch {
+        resolve(null);
+        return;
+      }
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE);
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => resolve(null);
+      request.onblocked = () => resolve(null);
+    });
+    return archiveDbPromise;
+  }
+
+  async function idbGetArchive() {
+    const db = await openArchiveDb();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      try {
+        const request = db.transaction(DB_STORE, "readonly").objectStore(DB_STORE).get(DB_KEY);
+        request.onsuccess = () => resolve(request.result ?? null);
+        request.onerror = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+
+  async function idbSetArchive(value) {
+    const db = await openArchiveDb();
+    if (!db) return false;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(DB_STORE, "readwrite");
+        tx.objectStore(DB_STORE).put(value, DB_KEY);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+        tx.onabort = () => resolve(false);
+      } catch {
+        resolve(false);
+      }
+    });
+  }
+
+  async function idbDeleteArchive() {
+    const db = await openArchiveDb();
+    if (!db) return false;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(DB_STORE, "readwrite");
+        tx.objectStore(DB_STORE).delete(DB_KEY);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+        tx.onabort = () => resolve(false);
+      } catch {
+        resolve(false);
+      }
+    });
+  }
 
   function safeUrl(value) {
     const raw = String(value ?? "").trim();
@@ -282,7 +358,7 @@
      --------------------------------------------------------------------- */
 
   function defaultState() {
-    return { version: VERSION, boards: [], prefs: { theme: "auto" } };
+    return { version: VERSION, boards: [], prefs: { theme: "auto" }, savedAt: 0 };
   }
 
   function sanitizeMeta(raw) {
@@ -423,42 +499,94 @@
       out.prefs.theme = raw.prefs.theme;
     }
 
+    out.savedAt = Number(raw.savedAt) || 0;
+
     return out;
+  }
+
+  function loadMirrorState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? sanitizeState(JSON.parse(raw)) : null;
+    } catch {
+      return null;
+    }
   }
 
   let storageAvailable = true;
   let bootNotice = "";
-  let state = loadState();
+  let state = loadMirrorState() || (() => {
+    const fresh = defaultState();
+    ensureLikesBoard(fresh);
+    return fresh;
+  })();
+  let persistQueue = Promise.resolve(true);
 
-  function loadState() {
+  async function loadStateAsync() {
+    const fromDb = await idbGetArchive();
+    const dbState = fromDb && typeof fromDb === "object" ? sanitizeState(fromDb) : null;
+
+    let mirrorState = null;
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
-        const fresh = defaultState();
-        ensureLikesBoard(fresh);
-        return fresh;
-      }
-      return sanitizeState(JSON.parse(raw));
+      if (raw) mirrorState = sanitizeState(JSON.parse(raw));
     } catch (error) {
-      bootNotice = "Your saved boards could not be read in this browser. Starting with a clean archive.";
-      return defaultState();
+      if (!dbState) {
+        bootNotice = "Your saved boards could not be read in this browser. Starting with a clean archive.";
+      }
     }
+
+    if (dbState && mirrorState) {
+      if ((mirrorState.savedAt || 0) > (dbState.savedAt || 0)) {
+        persist(mirrorState, { quiet: true });
+        return mirrorState;
+      }
+      persist(dbState, { quiet: true });
+      return dbState;
+    }
+
+    if (dbState) {
+      persist(dbState, { quiet: true });
+      return dbState;
+    }
+
+    if (mirrorState) {
+      persist(mirrorState, { quiet: true });
+      return mirrorState;
+    }
+
+    const fresh = defaultState();
+    ensureLikesBoard(fresh);
+    persist(fresh, { quiet: true });
+    return fresh;
   }
 
   function persist(target = state, { quiet = false } = {}) {
+    target.savedAt = Date.now();
+    let mirrored = false;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(target));
-      storageAvailable = true;
-      return true;
-    } catch (error) {
-      storageAvailable = false;
-      if (!quiet) {
+      mirrored = true;
+    } catch {
+      /* IndexedDB can still hold the archive when localStorage is full. */
+    }
+
+    const run = () => idbSetArchive(target);
+    persistQueue = persistQueue.then(run, run).then(
+      (saved) => Boolean(saved),
+      () => false
+    );
+
+    return persistQueue.then((saved) => {
+      const stored = saved || mirrored;
+      storageAvailable = stored;
+      if (!stored && !quiet) {
         showToast("This browser would not save your changes. They will last for this tab only.", {
           duration: 7000,
         });
       }
-      return false;
-    }
+      return stored;
+    });
   }
 
   function loadDisplayBuffer() {
@@ -916,13 +1044,14 @@
     }
   }
 
-  async function searchAllSources(query, signal) {
-    const key = `all:${String(query).toLowerCase()}`;
+  async function searchAllSourcesPage(query, page = 1, signal) {
+    const safePage = Math.max(1, Number(page) || 1);
+    const key = `all:${String(query).toLowerCase()}:${safePage}`;
     if (searchCache.has(key)) return searchCache.get(key);
 
     const settled = await Promise.allSettled([
-      openverseSearch(query, 1, signal),
-      wikimediaSearch(query, 1, signal),
+      openverseSearch(query, safePage, signal),
+      wikimediaSearch(query, safePage, signal),
     ]);
     if (signal && signal.aborted) throw new DOMException("Aborted", "AbortError");
 
@@ -930,9 +1059,13 @@
     const seen = new Set();
     const notices = [];
     let successes = 0;
+    let pageCount = safePage;
+    let total = 0;
     for (const result of settled) {
       if (result.status !== "fulfilled") continue;
       successes += 1;
+      pageCount = Math.max(pageCount, Number(result.value.pageCount) || safePage);
+      total += Number(result.value.total) || 0;
       for (const item of result.value.items || []) {
         if (!item || !item.url || seen.has(item.url)) continue;
         seen.add(item.url);
@@ -944,9 +1077,20 @@
       throw (reason && reason.reason) || new Error("No image sources answered.");
     }
     if (successes === 1) notices.push("Only one image source answered. Results may be thinner.");
-    const result = { provider: "all", items, page: 1, pageCount: 1, total: items.length, notice: notices.join(" ") };
+    const result = {
+      provider: "all",
+      items,
+      page: safePage,
+      pageCount,
+      total,
+      notice: notices.join(" "),
+    };
     cacheSet(searchCache, key, result);
     return result;
+  }
+
+  async function searchAllSources(query, signal) {
+    return searchAllSourcesPage(query, 1, signal);
   }
 
   function bufferMatchesTags(tags, limit = 16) {
@@ -1040,9 +1184,34 @@
      UI state
      --------------------------------------------------------------------- */
 
+  function createFeedState() {
+    return {
+      loading: false,
+      loadingMore: false,
+      items: [],
+      seeds: [],
+      sig: "",
+      error: "",
+      notice: "",
+      anchor: null,
+      tagIndex: 0,
+      pageByTag: Object.create(null),
+      doneTags: new Set(),
+      seen: new Set(),
+      saved: new Set(),
+      exhausted: false,
+      activeTag: "",
+      batch: 0,
+    };
+  }
+
   const ui = {
     view: { name: "home" },
     dataVersion: 0,
+    feedObserver: null,
+    pageObserver: null,
+    boardPage: { boardId: "", limit: BOARD_PAGE_SIZE },
+    allLimit: BOARD_PAGE_SIZE,
     search: {
       token: 0,
       controller: null,
@@ -1056,15 +1225,7 @@
       notice: "",
       source: "",
     },
-    feed: {
-      loading: false,
-      items: [],
-      seeds: [],
-      sig: "",
-      error: "",
-      notice: "",
-      anchor: null,
-    },
+    feed: createFeedState(),
     boardRelated: {
       boardId: "",
       loading: false,
@@ -1448,8 +1609,28 @@
     return [];
   }
 
+  function feedSentinelHTML() {
+    if (ui.feed.exhausted) {
+      return `<div class="feed-end">
+        <p>Sift has walked every tag and page it can reach right now.</p>
+        <button class="btn btn-quiet btn-small" type="button" data-action="refresh-feed">${icon("shuffle")}Start a new orbit</button>
+      </div>`;
+    }
+    const label = ui.feed.loadingMore
+      ? "Loading more from your tags…"
+      : ui.feed.activeTag
+        ? `Next after “${ui.feed.activeTag}”`
+        : "Load more from your tags";
+    return `<div class="feed-sentinel" data-feed-sentinel>
+      <button class="btn btn-quiet" type="button" data-action="load-more-feed" ${
+        ui.feed.loadingMore ? "disabled" : ""
+      }>${icon("shuffle")}${esc(label)}</button>
+      <p>Scroll to keep rotating through your collected tags and their result pages.</p>
+    </div>`;
+  }
+
   function feedBodyHTML() {
-    if (ui.feed.error) {
+    if (ui.feed.error && !ui.feed.items.length) {
       return `<div class="load-error">
         <h3>The trail went cold.</h3>
         <p>${esc(ui.feed.error)}</p>
@@ -1474,7 +1655,7 @@
       </div>`;
     }
 
-    return masonryHTML(ui.feed.items, { showSave: true });
+    return `${masonryHTML(ui.feed.items, { showSave: true })}${feedSentinelHTML()}`;
   }
 
   function feedSectionHTML() {
@@ -1483,19 +1664,24 @@
         <div>
           <p class="eyebrow">From your orbit</p>
           <h2>More like what you kept.</h2>
-          <p>Related images drawn from your boards and saved links. Nothing here is saved until you choose it.</p>
+          <p>A rotating feed built from every tag on your public boards. It walks through tags and result pages as you scroll; nothing is saved until you choose it.</p>
           ${
             ui.feed.seeds.length
               ? `<div class="seed-row">${ui.feed.seeds
-                  .slice(0, 6)
-                  .map((seed) => `<span class="seed-chip">${esc(seed)}</span>`)
+                  .slice(0, 8)
+                  .map(
+                    (seed) =>
+                      `<span class="seed-chip${seed === ui.feed.activeTag ? " is-active" : ""}">${esc(
+                        seed
+                      )}</span>`
+                  )
                   .join("")}</div>`
               : ""
           }
         </div>
         <div class="section-actions">
           <button class="icon-action" type="button" data-action="refresh-feed" ${
-            ui.feed.loading ? "disabled" : ""
+            ui.feed.loading || ui.feed.loadingMore ? "disabled" : ""
           }>${icon("shuffle")}Shuffle</button>
         </div>
       </div>
@@ -1529,23 +1715,82 @@
     document.title = "Sift — your field";
   }
 
+  function nextFeedTag() {
+    const seeds = ui.feed.seeds;
+    if (!seeds.length) return null;
+    for (let attempt = 0; attempt < seeds.length; attempt += 1) {
+      const index = ui.feed.tagIndex % seeds.length;
+      const tag = seeds[index];
+      ui.feed.tagIndex = (index + 1) % seeds.length;
+      if (!tag || ui.feed.doneTags.has(tag)) continue;
+      return { tag, page: (ui.feed.pageByTag[tag] || 0) + 1 };
+    }
+    return null;
+  }
+
+  async function loadFeedBatch() {
+    if (!ui.feed.seeds.length) return { added: 0, error: "" };
+    const notices = [];
+    let lastError = "";
+
+    for (let attempt = 0; attempt < FEED_MAX_ATTEMPTS; attempt += 1) {
+      const pick = nextFeedTag();
+      if (!pick) {
+        ui.feed.exhausted = true;
+        break;
+      }
+
+      ui.feed.activeTag = pick.tag;
+      const buffered = bufferMatchesTags([pick.tag], 10);
+      let result;
+      try {
+        result = await searchAllSourcesPage(pick.tag, pick.page);
+      } catch (error) {
+        if (error.name === "AbortError") throw error;
+        lastError = error.message || "The image sources did not answer.";
+        if (result && result.notice) notices.push(result.notice);
+        continue;
+      }
+
+      if (result.notice) notices.push(result.notice);
+      ui.feed.pageByTag[pick.tag] = pick.page;
+      const pageCount = Number(result.pageCount) || pick.page;
+      if (pick.page >= pageCount) ui.feed.doneTags.add(pick.tag);
+
+      const added = [];
+      for (const group of [buffered, result.items || []]) {
+        for (const item of group) {
+          if (!item || !item.url) continue;
+          if (ui.feed.saved.has(item.url) || ui.feed.seen.has(item.url)) continue;
+          ui.feed.seen.add(item.url);
+          added.push(item);
+          if (added.length >= FEED_BATCH) break;
+        }
+        if (added.length >= FEED_BATCH) break;
+      }
+
+      if (added.length) {
+        ui.feed.items.push(...added);
+        ui.feed.batch += 1;
+        if (notices.length) ui.feed.notice = Array.from(new Set(notices)).join(" ");
+        return { added: added.length, error: "" };
+      }
+    }
+
+    if (notices.length) ui.feed.notice = Array.from(new Set(notices)).join(" ");
+    return { added: 0, error: lastError };
+  }
+
   async function loadHomeFeed(force = false) {
     if (ui.feed.loading) return;
     const signature = feedSignature();
 
     if (!force && ui.feed.items.length && ui.feed.sig === signature && !ui.feed.error) return;
 
-    ui.feed.loading = true;
-    ui.feed.error = "";
-    ui.feed.notice = "";
+    ui.feed = createFeedState();
     ui.feed.sig = signature;
-    if (force) {
-      ui.feed.items = [];
-      ui.feed.seeds = [];
-      if (ui.view.name === "home") render();
-    }
 
-    const master = masterTags(12);
+    const master = masterTags(MAX_MASTER_TAGS);
     let seeds = master.map((tag) => tag.value);
     if (!seeds.length) {
       const publicBoards = state.boards.filter(
@@ -1553,61 +1798,27 @@
       );
       seeds = publicBoards
         .flatMap((board) => [...(board.seeds || []), ...titleWords(board.name, 2)])
-        .filter(usefulSeed)
-        .slice(0, 6);
+        .filter(usefulSeed);
     }
-    ui.feed.seeds = seeds.slice(0, 6);
-    ui.feed.anchor = null;
+    ui.feed.seeds = Array.from(new Set(seeds)).slice(0, MAX_MASTER_TAGS);
+    ui.feed.saved = new Set(allPins().map((pin) => pin.url));
 
-    if (!seeds.length) {
-      ui.feed.loading = false;
+    if (!ui.feed.seeds.length) {
       ui.feed.error =
         "Save an image to a public board to start the feed. Private boards are kept out of shared suggestions.";
       if (ui.view.name === "home") render();
       return;
     }
 
-    const savedUrls = new Set(allPins().map((pin) => pin.url));
-    const buffered = bufferMatchesTags(seeds, 18);
-    const tasks = seeds.slice(0, 3).map((seed) =>
-      searchAllSources(seed).catch(() => null)
-    );
+    ui.feed.loading = true;
+    if (ui.view.name === "home") render();
 
     try {
-      const settled = await Promise.allSettled(tasks);
-      const notices = [];
-      const groups = [buffered];
-      let anySuccess = buffered.length > 0;
-
-      for (const result of settled) {
-        if (result.status !== "fulfilled" || !result.value) continue;
-        anySuccess = true;
-        groups.push(result.value.items || []);
-        if (result.value.notice) notices.push(result.value.notice);
-      }
-
-      const items = [];
-      const max = Math.max(0, ...groups.map((group) => group.length));
-      for (let index = 0; index < max; index += 1) {
-        for (const group of groups) {
-          if (group[index]) items.push(group[index]);
-        }
-      }
-
-      const seen = new Set();
-      ui.feed.items = items
-        .filter((item) => {
-          if (!item || !item.url || savedUrls.has(item.url) || seen.has(item.url)) return false;
-          seen.add(item.url);
-          return true;
-        })
-        .slice(0, FEED_LIMIT);
-
-      if (notices.length) ui.feed.notice = Array.from(new Set(notices)).join(" ");
-      if (!anySuccess) {
+      const first = await loadFeedBatch();
+      if (first.error && !ui.feed.items.length) {
         ui.feed.error = "Sift could not reach the image sources. Check your connection and try again.";
-      } else if (!ui.feed.items.length) {
-        ui.feed.error = "The image sources had nothing new for these tags. Save another image or try a different search.";
+      } else if (!ui.feed.items.length && !ui.feed.exhausted) {
+        ui.feed.error = "The image sources had nothing new for these tags. Save another image or shuffle the orbit.";
       }
     } catch (error) {
       if (error.name !== "AbortError") {
@@ -1619,17 +1830,56 @@
     }
   }
 
-  function refreshFeed() {
-    ui.feed.items = [];
-    ui.feed.sig = "";
-    ui.feed.error = "";
-    ui.feed.loading = false;
-    render();
+  async function loadMoreFeed() {
+    if (
+      ui.view.name !== "home" ||
+      ui.feed.loading ||
+      ui.feed.loadingMore ||
+      ui.feed.exhausted ||
+      !ui.feed.items.length
+    ) {
+      return;
+    }
+
+    ui.feed.loadingMore = true;
+    if (ui.view.name === "home") render();
+
+    try {
+      const result = await loadFeedBatch();
+      if (result.error && !ui.feed.notice) {
+        ui.feed.notice = "Some sources are busy right now. Scroll again or shuffle the orbit.";
+      }
+    } catch (error) {
+      if (error.name !== "AbortError") {
+        ui.feed.notice = "The image sources paused. Scroll again or shuffle the orbit.";
+      }
+    } finally {
+      ui.feed.loadingMore = false;
+      if (ui.view.name === "home") render();
+    }
   }
 
-  /* ---------------------------------------------------------------------
-     Search
-     --------------------------------------------------------------------- */
+  function refreshFeed() {
+    ui.feed = createFeedState();
+    if (ui.view.name === "home") render();
+  }
+
+  function observeFeed() {
+    if (ui.feedObserver) {
+      ui.feedObserver.disconnect();
+      ui.feedObserver = null;
+    }
+    if (ui.view.name !== "home" || !("IntersectionObserver" in window)) return;
+    const sentinel = $("[data-feed-sentinel]");
+    if (!sentinel) return;
+    ui.feedObserver = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) loadMoreFeed();
+      },
+      { rootMargin: "800px 0px 800px 0px", threshold: 0.01 }
+    );
+    ui.feedObserver.observe(sentinel);
+  }
 
   function webBufferItems(exclude = new Set()) {
     return Array.from(displayBuffer.values())
@@ -1813,8 +2063,20 @@
      All saved
      --------------------------------------------------------------------- */
 
+  function pagedSentinelHTML(kind, visible, total) {
+    if (visible >= total) return "";
+    const remaining = total - visible;
+    return `<div class="feed-sentinel" data-page-sentinel="${esc(kind)}">
+      <button class="btn btn-quiet" type="button" data-action="${
+        kind === "board" ? "load-more-board" : "load-more-all"
+      }">${icon("grid")}Load ${Math.min(BOARD_PAGE_SIZE, remaining)} more</button>
+      <p>Showing ${visible} of ${total} saved link${total === 1 ? "" : "s"}.</p>
+    </div>`;
+  }
+
   function renderAllSaved() {
     const pins = allPins().sort((a, b) => String(b.savedAt).localeCompare(String(a.savedAt)));
+    const visiblePins = pins.slice(0, ui.allLimit);
 
     $("#view").innerHTML = `<div class="view-inner">
       <header class="board-head">
@@ -1837,7 +2099,10 @@
       </header>
       ${
         pins.length
-          ? `<div class="board-pins">${masonryHTML(pins, { showSave: false, showBoard: true })}</div>`
+          ? `<div class="board-pins">${masonryHTML(visiblePins, {
+              showSave: false,
+              showBoard: true,
+            })}</div>${pagedSentinelHTML("all", visiblePins.length, pins.length)}`
           : `<div class="empty-panel" style="margin-top:28px">
               <div class="empty-inner">
                 ${brandMarkSVG()}
@@ -1906,7 +2171,11 @@
       return;
     }
 
+    if (ui.boardPage.boardId !== board.id) {
+      ui.boardPage = { boardId: board.id, limit: BOARD_PAGE_SIZE };
+    }
     const pins = [...board.pins].sort((a, b) => String(b.savedAt).localeCompare(String(a.savedAt)));
+    const visiblePins = pins.slice(0, ui.boardPage.limit);
     const boardTags = (board.tags || []).slice(0, 18);
     const canFindRelated = pins.length > 0 || board.seeds.length > 0 || boardTags.length > 0;
 
@@ -1973,7 +2242,10 @@
 
       ${
         pins.length
-          ? `<div class="board-pins">${masonryHTML(pins, { showSave: false, boardId: board.id })}</div>`
+          ? `<div class="board-pins">${masonryHTML(visiblePins, {
+              showSave: false,
+              boardId: board.id,
+            })}</div>${pagedSentinelHTML("board", visiblePins.length, pins.length)}`
           : `<div class="empty-panel" style="margin-top:28px">
               <div class="empty-inner">
                 ${brandMarkSVG()}
@@ -2085,6 +2357,45 @@
       ui.boardRelated.loading = false;
       if (ui.view.name === "board" && ui.view.boardId === board.id) render();
     }
+  }
+
+  function loadMoreBoardPins() {
+    const board = boardById(ui.view.boardId);
+    if (!board || ui.view.name !== "board") return;
+    if (ui.boardPage.boardId !== board.id) {
+      ui.boardPage = { boardId: board.id, limit: BOARD_PAGE_SIZE };
+    }
+    if (ui.boardPage.limit >= board.pins.length) return;
+    ui.boardPage.limit = Math.min(board.pins.length, ui.boardPage.limit + BOARD_PAGE_SIZE);
+    render();
+  }
+
+  function loadMoreAllPins() {
+    if (ui.view.name !== "all") return;
+    const total = allPins().length;
+    if (ui.allLimit >= total) return;
+    ui.allLimit = Math.min(total, ui.allLimit + BOARD_PAGE_SIZE);
+    render();
+  }
+
+  function observePage() {
+    if (ui.pageObserver) {
+      ui.pageObserver.disconnect();
+      ui.pageObserver = null;
+    }
+    if (!("IntersectionObserver" in window)) return;
+    const sentinel = $("[data-page-sentinel]");
+    if (!sentinel) return;
+    ui.pageObserver = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        const kind = sentinel.dataset.pageSentinel;
+        if (kind === "board") loadMoreBoardPins();
+        else if (kind === "all") loadMoreAllPins();
+      },
+      { rootMargin: "700px 0px 700px 0px", threshold: 0.01 }
+    );
+    ui.pageObserver.observe(sentinel);
   }
 
   /* ---------------------------------------------------------------------
@@ -2777,7 +3088,7 @@
 
       state = imported;
       ui.dataVersion += 1;
-      ui.feed = { loading: false, items: [], seeds: [], sig: "", error: "", notice: "", anchor: null };
+      ui.feed = createFeedState();
       ui.boardRelated = {
         boardId: "",
         loading: false,
@@ -3021,7 +3332,6 @@
 
       const siftOrigin = config.siftOrigin || "*";
       let ready = false;
-      let done = null;
       let lastProgress = {
         phase: "start",
         text: "Reading the board list…",
@@ -3047,11 +3357,6 @@
         if (event.data.token !== config.token) return;
         ready = true;
         post("sift:pinterest-progress", lastProgress);
-        if (done) {
-          post("sift:pinterest-data", done);
-          done = null;
-          window.removeEventListener("message", onReady);
-        }
       };
       window.addEventListener("message", onReady);
 
@@ -3106,7 +3411,6 @@
         if (boards.length > (config.boardCap || 200)) warnings.push("Only the first 200 boards were imported.");
 
         const selectedBoards = boards.slice(0, config.boardCap || 200);
-        const output = [];
         let pinTotal = 0;
         for (let index = 0; index < selectedBoards.length; index += 1) {
           const board = selectedBoards[index];
@@ -3151,13 +3455,19 @@
           }
           if (boardWarning) warnings.push(boardWarning);
           pinTotal += pins.length;
-          output.push({
-            id: String(board.id),
-            name: text(board.name, 80) || "Untitled board",
-            privacy: ["public", "private", "secret"].includes(String(board.privacy))
-              ? String(board.privacy)
-              : "public",
-            pins,
+          post("sift:pinterest-board", {
+            username,
+            board: {
+              id: String(board.id),
+              name: text(board.name, 80) || "Untitled board",
+              privacy: ["public", "private", "secret"].includes(String(board.privacy))
+                ? String(board.privacy)
+                : "public",
+              pins,
+            },
+            index: index + 1,
+            total: selectedBoards.length,
+            warnings: warnings.slice(0, 40),
           });
           progress({
             phase: "pins",
@@ -3182,15 +3492,15 @@
             }. Sign in to Pinterest for fuller imports.`
           );
         }
-        done = { username, boards: output, warnings: warnings.slice(0, 40) };
-        for (let wait = 0; wait < 20 && !ready; wait += 1) {
-          await sleep(500);
-        }
         if (!ready) {
           throw new Error("Sift did not answer. Close the extra tab, allow pop-ups for Pinterest, and run the importer again.");
         }
-        post("sift:pinterest-data", done);
-        done = null;
+        post("sift:pinterest-done", {
+          username,
+          warnings: warnings.slice(0, 40),
+          boards: selectedBoards.length,
+          pins: pinTotal,
+        });
         window.removeEventListener("message", onReady);
       } catch (error) {
         post("sift:pinterest-error", { message: text(error.message, 240) || "Pinterest import failed." });
@@ -3907,7 +4217,7 @@
     error.hidden = !message;
   }
 
-  function mergePinterestBoards(username, boards) {
+  async function mergePinterestBoards(username, boards) {
     const next = JSON.parse(JSON.stringify(state));
     let created = 0;
     let merged = 0;
@@ -3973,7 +4283,7 @@
       board.updatedAt = nowIso();
     }
 
-    if (!persist(next, { quiet: true })) {
+    if (!(await persist(next, { quiet: true }))) {
       return { ok: false, reason: "storage" };
     }
 
@@ -3986,7 +4296,7 @@
     return { ok: true, created, merged, added, duplicates, skipped, skippedBoards };
   }
 
-  function importSelectedPinterest() {
+  async function importSelectedPinterest() {
     if (!pinterestTransfer || !pinterestTransfer.data) return;
     const data = pinterestTransfer.data;
     const selected = $$("[data-pinterest-board]")
@@ -3998,7 +4308,7 @@
       return;
     }
 
-    const result = mergePinterestBoards(data.username, selected);
+    const result = await mergePinterestBoards(data.username, selected);
     if (!result.ok) {
       setPinterestError(
         "This browser ran out of space for the import. Nothing was changed. Select fewer boards and try again."
@@ -4080,6 +4390,67 @@
         window.clearInterval(pinterestTransfer.readyTimer);
         return;
       }
+      if (event.data.type === "sift:pinterest-board") {
+        const payload = event.data.payload || {};
+        if (!pinterestTransfer.data) {
+          pinterestTransfer.data = {
+            username: normalizePinterestUsername(payload.username) || fallbackUsername,
+            boards: [],
+            warnings: [],
+          };
+        }
+        const parsed = sanitizePinterestPayload(
+          { username: payload.username, boards: [payload.board], warnings: [] },
+          fallbackUsername
+        );
+        const board = parsed.boards[0];
+        if (board) {
+          const existing = pinterestTransfer.data.boards.findIndex(
+            (candidate) => String(candidate.id) === String(board.id)
+          );
+          if (existing >= 0) pinterestTransfer.data.boards[existing] = board;
+          else pinterestTransfer.data.boards.push(board);
+        }
+        if (Array.isArray(payload.warnings)) {
+          pinterestTransfer.data.warnings = payload.warnings
+            .map((warning) => cleanText(warning, 180))
+            .filter(Boolean)
+            .slice(0, 40);
+        }
+        const pins = pinterestTransfer.data.boards.reduce(
+          (sum, item) => sum + item.pins.length,
+          0
+        );
+        pinterestProgress({
+          phase: "pins",
+          text: `Received ${pinterestTransfer.data.boards.length} board${
+            pinterestTransfer.data.boards.length === 1 ? "" : "s"
+          } and ${pins} link${pins === 1 ? "" : "s"}…`,
+          boards: Number(payload.index) || pinterestTransfer.data.boards.length,
+          total: Number(payload.total) || 0,
+          pins,
+        });
+        return;
+      }
+      if (event.data.type === "sift:pinterest-done") {
+        const payload = event.data.payload || {};
+        if (!pinterestTransfer.data) {
+          pinterestTransfer.data = {
+            username: normalizePinterestUsername(payload.username) || fallbackUsername,
+            boards: [],
+            warnings: [],
+          };
+        }
+        if (Array.isArray(payload.warnings)) {
+          pinterestTransfer.data.warnings = payload.warnings
+            .map((warning) => cleanText(warning, 180))
+            .filter(Boolean)
+            .slice(0, 40);
+        }
+        window.clearInterval(pinterestTransfer.readyTimer);
+        pinterestPreview(pinterestTransfer.data);
+        return;
+      }
       if (event.data.type === "sift:pinterest-data") {
         const data = sanitizePinterestPayload(event.data.payload, fallbackUsername);
         pinterestTransfer.data = data;
@@ -4136,7 +4507,7 @@
     }
     persist();
     ui.dataVersion += 1;
-    ui.feed = { loading: false, items: [], seeds: [], sig: "", error: "", notice: "", anchor: null };
+    ui.feed = createFeedState();
     searchCache.clear();
     relatedCache.clear();
     imageCache.clear();
@@ -4200,6 +4571,8 @@
 
     updateSidebarState();
     observeReveals();
+    observeFeed();
+    observePage();
 
     if (ui.view.name === "home" && allPins().length) {
       const signature = feedSignature();
@@ -4366,6 +4739,15 @@
         return true;
       case "refresh-feed":
         refreshFeed();
+        return true;
+      case "load-more-feed":
+        loadMoreFeed();
+        return true;
+      case "load-more-board":
+        loadMoreBoardPins();
+        return true;
+      case "load-more-all":
+        loadMoreAllPins();
         return true;
       case "load-more":
         performSearch(ui.search.query, { append: true });
@@ -4722,10 +5104,27 @@
         return;
       }
       if (event.key !== STORAGE_KEY) return;
-      state = loadState();
-      applyTheme();
-      renderSidebar();
-      render();
+      let loaded = null;
+      if (event.newValue) {
+        try {
+          loaded = sanitizeState(JSON.parse(event.newValue));
+        } catch {
+          loaded = null;
+        }
+      }
+      if (loaded) {
+        state = loaded;
+        applyTheme();
+        renderSidebar();
+        render();
+        return;
+      }
+      loadStateAsync().then((nextState) => {
+        state = nextState;
+        applyTheme();
+        renderSidebar();
+        render();
+      });
     });
 
     window.addEventListener("resize", () => {
@@ -4772,17 +5171,26 @@
      Init
      --------------------------------------------------------------------- */
 
-  function init() {
+  async function init() {
     applyTheme();
     bindEvents();
     renderSidebar();
     render();
 
+    if (!initPinterestReceiver()) initWebCaptureReceiver();
+
+    const dataVersion = ui.dataVersion;
+    const nextState = await loadStateAsync();
+    if (ui.dataVersion === dataVersion && nextState !== state) {
+      state = nextState;
+      applyTheme();
+      renderSidebar();
+      render();
+    }
+
     if (bootNotice) {
       window.setTimeout(() => showToast(bootNotice, { duration: 8000 }), 350);
     }
-
-    if (!initPinterestReceiver()) initWebCaptureReceiver();
   }
 
   init();
