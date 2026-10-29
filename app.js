@@ -21,6 +21,7 @@
   const FEED_BATCH = 36;
   const FEED_MAX_ATTEMPTS = 4;
   const BOARD_PAGE_SIZE = 60;
+  const BOARD_NAME_WEIGHT = 3;
   const API_BASE = "https://api.openverse.org/v1";
   const WIKI_API = "https://commons.wikimedia.org/w/api.php";
   const LIKES_ID = "likes";
@@ -1190,6 +1191,7 @@
       loadingMore: false,
       items: [],
       seeds: [],
+      schedule: [],
       sig: "",
       error: "",
       notice: "",
@@ -1579,11 +1581,51 @@
     return `${web.length}:${latest}`;
   }
 
+  function feedSeedPlan() {
+    const names = [];
+    const nameSet = new Set();
+    for (const board of state.boards) {
+      if (board.privacy === "private" || board.system === "likes") continue;
+      const name = cleanText(board.name, 80).toLowerCase();
+      if (!usefulSeed(name) || nameSet.has(name)) continue;
+      nameSet.add(name);
+      names.push(name);
+    }
+
+    const tags = [];
+    for (const tag of masterTags(MAX_MASTER_TAGS)) {
+      if (!tag.value || nameSet.has(tag.value) || !usefulSeed(tag.value)) continue;
+      tags.push(tag.value);
+    }
+
+    const seeds = Array.from(new Set([...names, ...tags]));
+    const schedule = [];
+    for (let round = 0; round < BOARD_NAME_WEIGHT; round += 1) {
+      for (const name of names) schedule.push(name);
+    }
+    for (const tag of tags) schedule.push(tag);
+
+    if (!schedule.length) {
+      const publicBoards = state.boards.filter(
+        (board) => board.privacy !== "private" && (board.pins.length || board.seeds.length)
+      );
+      const fallback = publicBoards
+        .flatMap((board) => [...(board.seeds || []), ...titleWords(board.name, 2)])
+        .filter(usefulSeed);
+      return {
+        seeds: Array.from(new Set(fallback)).slice(0, MAX_MASTER_TAGS),
+        schedule: Array.from(new Set(fallback)).slice(0, MAX_MASTER_TAGS),
+      };
+    }
+
+    return { seeds, schedule };
+  }
+
   function feedSignature() {
     return state.boards
       .map(
         (board) =>
-          `${board.id}:${board.privacy}:${board.pins.length}:${board.seeds.join(",")}:${(
+          `${board.id}:${board.name}:${board.privacy}:${board.pins.length}:${board.seeds.join(",")}:${(
             board.tags || []
           )
             .map((tag) => `${tag.value}:${tag.count}:${tag.lastUsedAt}`)
@@ -1612,20 +1654,20 @@
   function feedSentinelHTML() {
     if (ui.feed.exhausted) {
       return `<div class="feed-end">
-        <p>Sift has walked every tag and page it can reach right now.</p>
+        <p>Sift has walked every board name, tag, and page it can reach right now.</p>
         <button class="btn btn-quiet btn-small" type="button" data-action="refresh-feed">${icon("shuffle")}Start a new orbit</button>
       </div>`;
     }
     const label = ui.feed.loadingMore
-      ? "Loading more from your tags…"
+      ? "Loading more from your boards and tags…"
       : ui.feed.activeTag
         ? `Next after “${ui.feed.activeTag}”`
-        : "Load more from your tags";
+        : "Load more from your boards and tags";
     return `<div class="feed-sentinel" data-feed-sentinel>
       <button class="btn btn-quiet" type="button" data-action="load-more-feed" ${
         ui.feed.loadingMore ? "disabled" : ""
       }>${icon("shuffle")}${esc(label)}</button>
-      <p>Scroll to keep rotating through your collected tags and their result pages.</p>
+      <p>Scroll to keep rotating through your board names, tags, and their result pages.</p>
     </div>`;
   }
 
@@ -1664,7 +1706,7 @@
         <div>
           <p class="eyebrow">From your orbit</p>
           <h2>More like what you kept.</h2>
-          <p>A rotating feed built from every tag on your public boards. It walks through tags and result pages as you scroll; nothing is saved until you choose it.</p>
+          <p>A rotating feed built from your public board names first, then the tags you keep. Board names lead the rotation; tags appear at a lower frequency. Nothing is saved until you choose it.</p>
           ${
             ui.feed.seeds.length
               ? `<div class="seed-row">${ui.feed.seeds
@@ -1716,7 +1758,7 @@
   }
 
   function nextFeedTag() {
-    const seeds = ui.feed.seeds;
+    const seeds = ui.feed.schedule.length ? ui.feed.schedule : ui.feed.seeds;
     if (!seeds.length) return null;
     for (let attempt = 0; attempt < seeds.length; attempt += 1) {
       const index = ui.feed.tagIndex % seeds.length;
@@ -1790,17 +1832,9 @@
     ui.feed = createFeedState();
     ui.feed.sig = signature;
 
-    const master = masterTags(MAX_MASTER_TAGS);
-    let seeds = master.map((tag) => tag.value);
-    if (!seeds.length) {
-      const publicBoards = state.boards.filter(
-        (board) => board.privacy !== "private" && (board.pins.length || board.seeds.length)
-      );
-      seeds = publicBoards
-        .flatMap((board) => [...(board.seeds || []), ...titleWords(board.name, 2)])
-        .filter(usefulSeed);
-    }
-    ui.feed.seeds = Array.from(new Set(seeds)).slice(0, MAX_MASTER_TAGS);
+    const plan = feedSeedPlan();
+    ui.feed.seeds = plan.seeds;
+    ui.feed.schedule = plan.schedule;
     ui.feed.saved = new Set(allPins().map((pin) => pin.url));
 
     if (!ui.feed.seeds.length) {

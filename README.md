@@ -119,9 +119,9 @@ Boards imported from Pinterest also carry an optional origin, used to recognize 
 
 ## Home feed and large archives
 
-- The home feed is built from tags on public boards, ordered by frequency and recency. It rotates through tags round-robin and pages through each tag's results instead of stopping at the first result set.
-- A sentinel near the bottom loads the next batch of 36 unique images as you scroll. Already saved links and repeats are skipped. When every reachable tag and page is exhausted, the feed offers **Start a new orbit**.
-- Openverse is the primary source; Wikimedia Commons is the fallback. Openverse's anonymous limits can pause a long feed, so the next scroll continues from the next tag or page.
+- The home feed starts with every public board name, in board order. Board names lead the rotation and repeat three times per cycle; image tags follow at a lower frequency. Private board names and tags stay out of feed searches.
+- It pages through each board name and tag instead of stopping at the first result set. A sentinel near the bottom loads the next batch of 36 unique images as you scroll. Already saved links and repeats are skipped. When every reachable board name, tag, and page is exhausted, the feed offers **Start a new orbit**.
+- Openverse is the primary source; Wikimedia Commons is the fallback. Openverse's anonymous limits can pause a long feed, so the next scroll continues from the next board name, tag, or page.
 - Board pages and **All saved** render 60 links at a time and load the next 60 when their sentinel comes into view. The full archive stays in state and IndexedDB, so large collections do not have to create every card at once.
 
 ## Pinterest import
