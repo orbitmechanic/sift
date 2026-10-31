@@ -20,6 +20,8 @@
   const MAX_BUFFER = 600;
   const FEED_BATCH = 36;
   const FEED_MAX_ATTEMPTS = 4;
+  const FEED_SOURCE_DEADLINE_MS = 5000;
+  const SEARCH_SOURCE_DEADLINE_MS = 8000;
   const BOARD_PAGE_SIZE = 60;
   const BOARD_NAME_WEIGHT = 3;
   const API_BASE = "https://api.openverse.org/v1";
@@ -30,6 +32,7 @@
       label: "DuckDuckGo",
       hosts: ["duckduckgo.com", "html.duckduckgo.com"],
       url: (q) => `https://duckduckgo.com/?q=${encodeURIComponent(q)}&iax=images&ia=images`,
+      featured: true,
     },
     brave: {
       label: "Brave Search",
@@ -50,6 +53,7 @@
       label: "Bing Images",
       hosts: ["bing.com", "www.bing.com"],
       url: (q) => `https://www.bing.com/images/search?q=${encodeURIComponent(q)}`,
+      featured: true,
     },
     ecosia: {
       label: "Ecosia",
@@ -61,7 +65,201 @@
       hosts: ["mojeek.com", "www.mojeek.com"],
       url: (q) => `https://www.mojeek.com/search?q=${encodeURIComponent(q)}&t=images`,
     },
+    google: {
+      label: "Google Images",
+      hosts: ["google.com", "www.google.com"],
+      url: (q) => `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(q)}`,
+      featured: true,
+    },
+    yandex: {
+      label: "Yandex Images",
+      hosts: ["yandex.com", "yandex.ru"],
+      url: (q) => `https://yandex.com/images/search?text=${encodeURIComponent(q)}`,
+    },
+    flickr: {
+      label: "Flickr",
+      hosts: ["flickr.com", "www.flickr.com"],
+      url: (q) => `https://www.flickr.com/search/?text=${encodeURIComponent(q)}&media=photos`,
+    },
+    imgur: {
+      label: "Imgur",
+      hosts: ["imgur.com", "www.imgur.com"],
+      url: (q) => `https://imgur.com/search?q=${encodeURIComponent(q)}`,
+    },
+    reddit: {
+      label: "Reddit",
+      hosts: ["reddit.com", "www.reddit.com", "old.reddit.com"],
+      url: (q) => `https://www.reddit.com/search/?q=${encodeURIComponent(q)}&type=media`,
+      featured: true,
+    },
+    giphy: {
+      label: "Giphy",
+      hosts: ["giphy.com", "www.giphy.com"],
+      url: (q) => `https://giphy.com/search/${encodeURIComponent(q)}`,
+      featured: true,
+    },
+    tenor: {
+      label: "Tenor",
+      hosts: ["tenor.com", "www.tenor.com"],
+      url: (q) => `https://tenor.com/search/${encodeURIComponent(q)}-gifs`,
+    },
+    tumblr: {
+      label: "Tumblr",
+      hosts: ["tumblr.com", "www.tumblr.com"],
+      url: (q) => `https://www.tumblr.com/search/${encodeURIComponent(q)}`,
+    },
+    bluesky: {
+      label: "Bluesky",
+      hosts: ["bsky.app"],
+      url: (q) => `https://bsky.app/search?q=${encodeURIComponent(q)}`,
+    },
+    artstation: {
+      label: "ArtStation",
+      hosts: ["artstation.com", "www.artstation.com"],
+      url: (q) => `https://www.artstation.com/search?q=${encodeURIComponent(q)}`,
+      featured: true,
+    },
+    deviantart: {
+      label: "DeviantArt",
+      hosts: ["deviantart.com", "www.deviantart.com"],
+      url: (q) => `https://www.deviantart.com/search?q=${encodeURIComponent(q)}`,
+    },
+    arena: {
+      label: "Are.na",
+      hosts: ["are.na", "www.are.na"],
+      url: (q) => `https://www.are.na/search?q=${encodeURIComponent(q)}`,
+      featured: true,
+    },
+    cosmos: {
+      label: "Cosmos",
+      hosts: ["cosmos.so", "www.cosmos.so"],
+      url: (q) => `https://www.cosmos.so/search?q=${encodeURIComponent(q)}`,
+    },
+    pinterest: {
+      label: "Pinterest",
+      hosts: ["pinterest.com", "www.pinterest.com"],
+      url: (q) => `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(q)}`,
+      featured: true,
+    },
+    ninegag: {
+      label: "9GAG",
+      hosts: ["9gag.com", "www.9gag.com"],
+      url: (q) => `https://9gag.com/search?query=${encodeURIComponent(q)}`,
+    },
+    knowyourmeme: {
+      label: "Know Your Meme",
+      hosts: ["knowyourmeme.com", "www.knowyourmeme.com"],
+      url: (q) => `https://knowyourmeme.com/search?q=${encodeURIComponent(q)}`,
+    },
+    unsplash: {
+      label: "Unsplash",
+      hosts: ["unsplash.com", "www.unsplash.com"],
+      url: (q) => `https://unsplash.com/s/photos/${encodeURIComponent(q)}`,
+      featured: true,
+    },
+    pexels: {
+      label: "Pexels",
+      hosts: ["pexels.com", "www.pexels.com"],
+      url: (q) => `https://www.pexels.com/search/${encodeURIComponent(q)}/`,
+      featured: true,
+    },
+    pixabay: {
+      label: "Pixabay",
+      hosts: ["pixabay.com", "www.pixabay.com"],
+      url: (q) => `https://pixabay.com/images/search/${encodeURIComponent(q)}/`,
+    },
   };
+
+  const SOURCE_META = {
+    openverse: { label: "Openverse", group: "open", weight: 4, home: "https://openverse.org" },
+    wikimedia: { label: "Wikimedia Commons", group: "open", weight: 3, home: "https://commons.wikimedia.org" },
+    artic: { label: "Art Institute of Chicago", group: "art", weight: 2, home: "https://www.artic.edu" },
+    met: { label: "The Met", group: "art", weight: 2, home: "https://www.metmuseum.org" },
+    vam: { label: "V&A", group: "art", weight: 2, home: "https://www.vam.ac.uk" },
+    arena: { label: "Are.na", group: "art", weight: 2, home: "https://www.are.na" },
+    nasa: { label: "NASA Image Library", group: "current", weight: 1, home: "https://images.nasa.gov" },
+    meme: { label: "Meme Stream", group: "memes", weight: 1, home: "https://meme-api.com" },
+    loc: { label: "Library of Congress", group: "archive", weight: 1, home: "https://www.loc.gov" },
+    archive: { label: "Internet Archive", group: "archive", weight: 1, home: "https://archive.org" },
+    commonsRandom: { label: "Commons Discoveries", group: "discover", weight: 1, home: "https://commons.wikimedia.org" },
+  };
+
+  const SOURCE_GROUPS = {
+    all: ["openverse", "wikimedia", "artic", "met", "vam", "arena", "nasa", "loc"],
+    open: ["openverse", "wikimedia"],
+    art: ["artic", "met", "vam", "arena"],
+    current: ["nasa", "arena", "meme", "commonsRandom"],
+    memes: ["meme", "wikimedia", "arena"],
+    archive: ["loc", "archive", "met"],
+    related: ["openverse", "wikimedia", "artic", "met", "vam", "arena"],
+  };
+
+  const SEARCH_GROUPS = [
+    { id: "all", label: "Everything" },
+    { id: "open", label: "Open collections" },
+    { id: "art", label: "Art museums" },
+    { id: "current", label: "Current & wild" },
+    { id: "memes", label: "Memes" },
+    { id: "archive", label: "Archives" },
+  ];
+
+  const MIX_MODES = {
+    calm: { label: "Calm", wildcards: 0, seedsPerBatch: 3, sourcesPerSeed: 2, wildcardWeight: 0 },
+    curious: { label: "Curious", wildcards: 3, seedsPerBatch: 4, sourcesPerSeed: 3, wildcardWeight: 1 },
+    wild: { label: "Wild", wildcards: 8, seedsPerBatch: 5, sourcesPerSeed: 4, wildcardWeight: 2 },
+  };
+
+  const DRIFT_SEEDS = [
+    "bioluminescence",
+    "brutalist concrete",
+    "botanical illustration",
+    "night market",
+    "deep sea creature",
+    "analog collage",
+    "desert bloom",
+    "mycelium",
+    "architectural shadow",
+    "retro futurism",
+    "hand-painted sign",
+    "museum specimen",
+    "textile pattern",
+    "cloudscape",
+    "microscopy",
+    "street photography",
+    "paper sculpture",
+    "tattoo flash",
+    "vintage sci-fi",
+    "aquatic life",
+    "mountain fog",
+    "neon signage",
+    "ceramic vessel",
+    "stained glass",
+    "risograph print",
+    "wunderkammer",
+    "folk costume",
+    "lichen",
+    "fern frond",
+    "brutalist stairwell",
+    "solar flare",
+    "cave painting",
+  ];
+
+  const MEME_SUBREDDITS = [
+    "memes",
+    "wholesomememes",
+    "me_irl",
+    "artmemes",
+    "trippinthroughtime",
+    "AccidentalRenaissance",
+    "HistoryMemes",
+    "DesignPorn",
+    "EarthPorn",
+    "SpacePorn",
+  ];
+
+  const PRIVACY_KEY = "sift.privacy.v1";
+  const VPN_CHECK_TTL = 30 * 60 * 1000;
+  const VPN_ACK_TTL = 12 * 60 * 60 * 1000;
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -359,7 +557,7 @@
      --------------------------------------------------------------------- */
 
   function defaultState() {
-    return { version: VERSION, boards: [], prefs: { theme: "auto" }, savedAt: 0 };
+    return { version: VERSION, boards: [], prefs: { theme: "auto", mix: "curious" }, savedAt: 0 };
   }
 
   function sanitizeMeta(raw) {
@@ -402,7 +600,21 @@
     const width = Number(raw.width);
     const height = Number(raw.height);
     const engine = WEB_ENGINES[raw.engine] ? raw.engine : "";
-    const provider = ["openverse", "wikimedia", "pinterest", "manual", "web"].includes(raw.provider)
+    const provider = [
+      "openverse",
+      "wikimedia",
+      "pinterest",
+      "manual",
+      "web",
+      "artic",
+      "met",
+      "vam",
+      "arena",
+      "nasa",
+      "loc",
+      "archive",
+      "meme",
+    ].includes(raw.provider)
       ? raw.provider
       : "manual";
 
@@ -498,6 +710,9 @@
 
     if (raw.prefs && ["auto", "light", "dusk"].includes(raw.prefs.theme)) {
       out.prefs.theme = raw.prefs.theme;
+    }
+    if (raw.prefs && MIX_MODES[raw.prefs.mix]) {
+      out.prefs.mix = raw.prefs.mix;
     }
 
     out.savedAt = Number(raw.savedAt) || 0;
@@ -770,7 +985,7 @@
   }
 
   /* ---------------------------------------------------------------------
-     API — Openverse first, Wikimedia Commons as fallback
+     API — open collections, museums, archives, and meme streams
      --------------------------------------------------------------------- */
 
   class ApiError extends Error {
@@ -837,12 +1052,21 @@
       pinterest: "Pinterest",
       flickr: "Flickr",
       manual: "Direct link",
+      artic: "Art Institute of Chicago",
+      met: "The Met",
+      vam: "V&A",
+      arena: "Are.na",
+      nasa: "NASA",
+      loc: "Library of Congress",
+      archive: "Internet Archive",
+      meme: "Meme Stream",
+      web: "Open web",
     };
     return map[source.toLowerCase()] || source || "Open web";
   }
 
   async function getJson(url, signal) {
-    const timeout = AbortSignal.timeout(16000);
+    const timeout = AbortSignal.timeout(12000);
     const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
     const response = await fetch(url, {
       signal: combined,
@@ -1025,73 +1249,903 @@
       page,
       pageCount: data && data.continue ? page + 1 : page,
       total,
-      notice: "Openverse is busy or rate-limiting. Showing results from Wikimedia Commons instead.",
+      notice: "",
     };
   }
 
-  async function searchImages(query, page = 1, signal) {
-    const key = `search:${query.toLowerCase()}:${page}`;
-    if (searchCache.has(key)) return searchCache.get(key);
+  /* ---------------------------------------------------------------------
+     Wider source adapters
+     --------------------------------------------------------------------- */
 
+  function textOf(value, max = 240) {
+    if (Array.isArray(value)) return cleanText(value.filter(Boolean).join(" · "), max);
+    return cleanText(value, max);
+  }
+
+  function shuffle(values) {
+    const out = values.slice();
+    for (let i = out.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [out[i], out[j]] = [out[j], out[i]];
+    }
+    return out;
+  }
+
+  function sourceKey(item) {
+    return `${item.provider || "web"}:${item.domain || item.source || ""}`;
+  }
+
+  function imageKeys(item) {
+    return [item && item.url, item && item.openverseId].filter(Boolean);
+  }
+
+  function tagsKey(item) {
+    return tagList(item && item.tags).slice(0, 10);
+  }
+
+  function tooSimilar(item, recentSources, recentTags) {
+    const source = sourceKey(item);
+    if (recentSources.slice(-2).includes(source) && Math.random() < 0.85) return true;
+    const tags = new Set(tagsKey(item));
+    if (!tags.size) return false;
+    for (const previous of recentTags.slice(-4)) {
+      let overlap = 0;
+      for (const tag of tags) if (previous.has(tag)) overlap += 1;
+      const ratio = overlap / Math.min(tags.size, previous.size || 1);
+      if (ratio >= 0.7 && Math.random() < 0.8) return true;
+    }
+    return false;
+  }
+
+  function mixImages(groups, { limit = FEED_BATCH, seen = new Set(), saved = new Set(), recent = [] } = {}) {
+    const queues = groups
+      .map((group) => ({ seed: group.seed || "", items: shuffle((group.items || []).filter(Boolean)) }))
+      .filter((group) => group.items.length);
+    if (!queues.length || limit <= 0) return [];
+
+    const out = [];
+    const used = new Set();
+    const recentSources = recent.slice(-8).map(sourceKey);
+    const recentTags = recent.slice(-8).map((item) => new Set(tagsKey(item)));
+
+    const take = (queue, allowSimilar) => {
+      for (let i = 0; i < queue.items.length; i += 1) {
+        const item = queue.items[i];
+        if (!item || !item.url) {
+          queue.items.splice(i, 1);
+          i -= 1;
+          continue;
+        }
+        const keys = imageKeys(item);
+        if (keys.some((key) => used.has(key) || seen.has(key)) || saved.has(item.url)) {
+          queue.items.splice(i, 1);
+          i -= 1;
+          continue;
+        }
+        if (!allowSimilar && tooSimilar(item, recentSources, recentTags)) continue;
+        queue.items.splice(i, 1);
+        return item;
+      }
+      return null;
+    };
+
+    let guard = 0;
+    while (out.length < limit && guard < limit * 24) {
+      guard += 1;
+      const order = shuffle(queues.map((_, index) => index));
+      let progress = false;
+      for (const index of order) {
+        if (out.length >= limit) break;
+        const queue = queues[index];
+        const item = take(queue, false) || take(queue, true);
+        if (!item) continue;
+        progress = true;
+        out.push(item);
+        for (const key of imageKeys(item)) used.add(key);
+        recentSources.push(sourceKey(item));
+        recentTags.push(new Set(tagsKey(item)));
+        if (recentSources.length > 8) recentSources.shift();
+        if (recentTags.length > 8) recentTags.shift();
+      }
+      if (!progress) break;
+    }
+    return out;
+  }
+
+  function normalizeAic(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const imageId = cleanText(raw.image_id, 80);
+    if (!imageId) return null;
+    const encoded = encodeURIComponent(imageId);
+    const url = `https://www.artic.edu/iiif/2/${encoded}/full/843,/0/default.jpg`;
+    const thumb = `https://www.artic.edu/iiif/2/${encoded}/full/400,/0/default.jpg`;
+    const title = cleanText(raw.title, 240) || "Untitled artwork";
+    const sourcePage = `https://www.artic.edu/artworks/${encodeURIComponent(String(raw.id || ""))}`;
+    const tags = tagList(
+      [
+        ...(Array.isArray(raw.term_titles) ? raw.term_titles : []),
+        raw.classification_title,
+        raw.department_title,
+        ...titleWords(title, 5),
+      ],
+      12
+    );
+    return remember({
+      provider: "artic",
+      url,
+      thumb,
+      title,
+      creator: cleanText(raw.artist_display, 160) || "Unknown",
+      license: raw.is_public_domain ? "Public domain" : "See source",
+      licenseUrl: "",
+      source: "Art Institute of Chicago",
+      sourcePage,
+      foreignLandingUrl: sourcePage,
+      domain: "artic.edu",
+      description: cleanText(
+        (raw.thumbnail && raw.thumbnail.alt_text) || raw.description || "",
+        600
+      ),
+      width: Number(raw.thumbnail && raw.thumbnail.width) || 0,
+      height: Number(raw.thumbnail && raw.thumbnail.height) || 0,
+      publishedAt: cleanText(raw.date_display, 40),
+      tags,
+      meta: {
+        imageId,
+        department: cleanText(raw.department_title, 80),
+        classification: cleanText(raw.classification_title, 80),
+        color: raw.color ? cleanText(JSON.stringify(raw.color), 120) : "",
+      },
+    });
+  }
+
+  async function aicSearch(query, page, signal) {
+    const limit = 16;
+    const params = new URLSearchParams({
+      q: query,
+      page: String(page),
+      limit: String(limit),
+      fields:
+        "id,title,image_id,artist_display,date_display,department_title,classification_title,color,thumbnail,term_titles,description,is_public_domain",
+    });
+    const data = await getJson(`https://api.artic.edu/api/v1/artworks/search?${params}`, signal);
+    const items = (data.data || []).map(normalizeAic).filter(Boolean);
+    return {
+      provider: "artic",
+      items,
+      page,
+      pageCount: Math.max(page, Number(data.pagination && data.pagination.total_pages) || page),
+      total: Number(data.pagination && data.pagination.total) || items.length,
+      notice: "",
+    };
+  }
+
+  function normalizeMet(raw) {
+    if (!raw || !raw.primaryImage) return null;
+    const title = cleanText(raw.title, 240) || "Untitled object";
+    const sourcePage = safeUrl(raw.objectURL) || "";
+    const tags = tagList(
+      [
+        ...(Array.isArray(raw.tags) ? raw.tags.map((tag) => tag && tag.term) : []),
+        raw.department,
+        raw.classification,
+        raw.medium,
+        raw.objectName,
+        ...titleWords(title, 5),
+      ],
+      12
+    );
+    return remember({
+      provider: "met",
+      url: safeUrl(raw.primaryImage) || "",
+      thumb: safeUrl(raw.primaryImageSmall) || safeUrl(raw.primaryImage) || "",
+      title,
+      creator: cleanText(raw.artistDisplayName, 160) || "Unknown",
+      license: raw.isPublicDomain ? "Public domain" : "See source",
+      licenseUrl: "",
+      source: "The Met",
+      sourcePage,
+      foreignLandingUrl: sourcePage,
+      domain: "metmuseum.org",
+      description: cleanText(
+        [raw.objectName, raw.medium, raw.creditLine].filter(Boolean).join(" · "),
+        600
+      ),
+      width: 0,
+      height: 0,
+      publishedAt: cleanText(raw.objectDate, 40),
+      tags,
+      meta: {
+        objectID: cleanText(String(raw.objectID || ""), 40),
+        department: cleanText(raw.department, 80),
+        classification: cleanText(raw.classification, 80),
+        medium: cleanText(raw.medium, 120),
+      },
+    });
+  }
+
+  async function metSearch(query, page, signal) {
+    /* The Met needs one search plus one request per object. Keep the page small
+       so a normal search does not trip its bot protection. */
+    const limit = 6;
+    const offset = (page - 1) * limit;
+    const params = new URLSearchParams({
+      q: query,
+      hasImages: "true",
+      limit: String(limit),
+      offset: String(offset),
+    });
+    const data = await getJson(
+      `https://collectionapi.metmuseum.org/public/collection/v1.1/search?${params}`,
+      signal
+    );
+    const ids = (data.objectIDs || []).slice(0, limit);
+    const settled = await Promise.allSettled(
+      ids.map((id) =>
+        getJson(`https://collectionapi.metmuseum.org/public/collection/v1/objects/${id}`, signal)
+      )
+    );
+    if (signal && signal.aborted) throw new DOMException("Aborted", "AbortError");
+    const items = [];
+    for (const result of settled) {
+      if (result.status !== "fulfilled") continue;
+      const item = normalizeMet(result.value);
+      if (item) items.push(item);
+    }
+    return {
+      provider: "met",
+      items,
+      page,
+      pageCount: Math.max(page, Math.ceil((Number(data.total) || 0) / limit)),
+      total: Number(data.total) || items.length,
+      notice: "",
+    };
+  }
+
+  function normalizeVam(raw) {
+    if (!raw || !raw._images) return null;
+    const base = safeUrl(raw._images._iiif_image_base_url);
+    if (!base) return null;
+    const stem = base.replace(/\/+$/, "");
+    const url = `${stem}/full/843,/0/default.jpg`;
+    const thumb = safeUrl(raw._images._primary_thumbnail) || `${stem}/full/400,/0/default.jpg`;
+    const title = cleanText(raw._primaryTitle, 240) || "Untitled object";
+    const maker = raw._primaryMaker && raw._primaryMaker.name ? raw._primaryMaker.name : "";
+    const systemNumber = cleanText(raw.systemNumber, 40);
+    const sourcePage = systemNumber
+      ? `https://collections.vam.ac.uk/item/${encodeURIComponent(systemNumber)}/`
+      : "https://www.vam.ac.uk";
+    const tags = tagList(
+      [raw.objectType, raw._primaryPlace, maker, ...titleWords(title, 5)],
+      12
+    );
+    return remember({
+      provider: "vam",
+      url,
+      thumb,
+      title,
+      creator: cleanText(maker, 160) || "Unknown",
+      license: "See source",
+      licenseUrl: "",
+      source: "V&A",
+      sourcePage,
+      foreignLandingUrl: sourcePage,
+      domain: "vam.ac.uk",
+      description: cleanText(
+        [raw.objectType, raw._primaryPlace, raw._primaryDate].filter(Boolean).join(" · "),
+        600
+      ),
+      width: 0,
+      height: 0,
+      publishedAt: cleanText(raw._primaryDate, 40),
+      tags,
+      meta: {
+        systemNumber,
+        objectType: cleanText(raw.objectType, 80),
+        place: cleanText(raw._primaryPlace, 80),
+      },
+    });
+  }
+
+  async function vamSearch(query, page, signal) {
+    const limit = 16;
+    const params = new URLSearchParams({
+      q: query,
+      images_exist: "1",
+      page_size: String(limit),
+      page: String(page),
+    });
+    const data = await getJson(`https://api.vam.ac.uk/v2/objects/search?${params}`, signal);
+    const items = (data.records || []).map(normalizeVam).filter(Boolean);
+    return {
+      provider: "vam",
+      items,
+      page,
+      pageCount: Math.max(page, Number(data.info && data.info.pages) || page),
+      total: Number(data.info && data.info.record_count) || items.length,
+      notice: "",
+    };
+  }
+
+  function normalizeArena(block, channel) {
+    if (!block || !block.image) return null;
+    if (block.metadata && String(block.metadata.automated_nsfw) === "true") return null;
+    const image = block.image;
+    const url = safeUrl(
+      (image.display && image.display.url) ||
+        (image.large && image.large.url) ||
+        (image.original && image.original.url)
+    );
+    if (!url) return null;
+    const thumb = safeUrl((image.thumb && image.thumb.url) || (image.square && image.square.url)) || url;
+    const title = cleanText(block.title || block.generated_title, 240) || "Are.na image";
+    const sourcePage =
+      safeUrl(block.source) ||
+      (block.id ? `https://www.are.na/block/${encodeURIComponent(String(block.id))}` : "https://www.are.na");
+    const description = cleanText(block.description, 600);
+    const tags = tagList(
+      [channel && channel.title, ...titleWords(title, 5), ...tagsFromText(description, 5)],
+      12
+    );
+    let domain = "are.na";
     try {
-      const result = await openverseSearch(query, page, signal);
-      cacheSet(searchCache, key, result);
-      return result;
-    } catch (error) {
-      if (error.name === "AbortError" || (signal && signal.aborted)) throw error;
-      const result = await wikimediaSearch(query, page, signal);
-      cacheSet(searchCache, key, result);
-      return result;
+      domain = new URL(sourcePage).hostname.replace(/^www\./, "");
+    } catch {
+      /* keep default */
+    }
+    return remember({
+      provider: "arena",
+      url,
+      thumb,
+      title,
+      creator: cleanText(block.user && (block.user.full_name || block.user.username), 160) || "Are.na",
+      license: "See source",
+      licenseUrl: "",
+      source: "Are.na",
+      sourcePage,
+      foreignLandingUrl: sourcePage,
+      domain,
+      description,
+      width: 0,
+      height: 0,
+      publishedAt: validIso(block.connected_at || block.created_at, ""),
+      tags,
+      meta: {
+        blockId: cleanText(String(block.id || ""), 40),
+        channel: cleanText(channel && channel.title, 80),
+      },
+    });
+  }
+
+  async function arenaSearch(query, page, signal) {
+    const search = await getJson(
+      `https://api.are.na/v2/search?q=${encodeURIComponent(query)}&per=6&page=1`,
+      signal
+    );
+    const channels = (search.channels || [])
+      .filter((channel) => channel && channel.slug && !channel["nsfw?"])
+      .slice(0, 3);
+    if (!channels.length) {
+      return { provider: "arena", items: [], page, pageCount: page, total: 0, notice: "" };
+    }
+    const settled = await Promise.allSettled(
+      channels.map((channel) =>
+        getJson(
+          `https://api.are.na/v2/channels/${encodeURIComponent(channel.slug)}/contents?per=10&page=${page}`,
+          signal
+        )
+      )
+    );
+    if (signal && signal.aborted) throw new DOMException("Aborted", "AbortError");
+    const items = [];
+    for (let index = 0; index < settled.length; index += 1) {
+      const result = settled[index];
+      if (result.status !== "fulfilled") continue;
+      const channel = channels[index];
+      for (const block of result.value.contents || []) {
+        const item = normalizeArena(block, channel);
+        if (item) items.push(item);
+      }
+    }
+    return {
+      provider: "arena",
+      items,
+      page,
+      pageCount: Math.max(
+        page,
+        ...channels.map((channel) => Math.ceil((Number(channel.length) || 0) / 10))
+      ),
+      total: items.length,
+      notice: "",
+    };
+  }
+
+  function normalizeNasa(raw) {
+    const data = raw && Array.isArray(raw.data) ? raw.data[0] : null;
+    if (!data || !data.nasa_id) return null;
+    const nasaId = cleanText(data.nasa_id, 80);
+    const links = Array.isArray(raw.links) ? raw.links : [];
+    const fullLink =
+      links.find((link) => link.rel === "canonical") ||
+      links.find((link) => /~orig\.(jpe?g|png)$/i.test(link.href || "")) ||
+      links.find((link) => /~medium\.(jpe?g|png)$/i.test(link.href || "")) ||
+      links.find((link) => link.render === "image");
+    const thumbLink =
+      links.find((link) => link.rel === "preview") ||
+      links.find((link) => /~thumb\.(jpe?g|png)$/i.test(link.href || "")) ||
+      fullLink;
+    const url =
+      safeUrl(fullLink && fullLink.href) ||
+      `https://images-assets.nasa.gov/image/${encodeURIComponent(nasaId)}/${encodeURIComponent(
+        nasaId
+      )}~medium.jpg`;
+    const title = cleanText(data.title, 240) || "NASA image";
+    const sourcePage = `https://images.nasa.gov/details/${encodeURIComponent(nasaId)}`;
+    const tags = tagList(
+      [
+        ...(Array.isArray(data.keywords) ? data.keywords : []),
+        data.center,
+        ...titleWords(title, 5),
+      ],
+      12
+    );
+    return remember({
+      provider: "nasa",
+      url,
+      thumb: safeUrl(thumbLink && thumbLink.href) || url,
+      title,
+      creator: cleanText(
+        data.photographer || data.secondary_creator || data.center || "NASA",
+        160
+      ),
+      license: "Public domain (NASA)",
+      licenseUrl: "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+      source: "NASA",
+      sourcePage,
+      foreignLandingUrl: sourcePage,
+      domain: "nasa.gov",
+      description: cleanText(data.description, 600),
+      width: Number(fullLink && fullLink.width) || 0,
+      height: Number(fullLink && fullLink.height) || 0,
+      publishedAt: validIso(data.date_created, ""),
+      tags,
+      meta: {
+        nasaId,
+        center: cleanText(data.center, 40),
+        keywords: tags.join(", "),
+      },
+    });
+  }
+
+  async function nasaSearch(query, page, signal) {
+    const limit = 20;
+    const params = new URLSearchParams({
+      q: query,
+      media_type: "image",
+      page: String(page),
+      page_size: String(limit),
+    });
+    const data = await getJson(`https://images-api.nasa.gov/search?${params}`, signal);
+    const collection = (data && data.collection) || {};
+    const items = (collection.items || []).map(normalizeNasa).filter(Boolean);
+    const total = Number(collection.metadata && collection.metadata.total_hits) || items.length;
+    return {
+      provider: "nasa",
+      items,
+      page,
+      pageCount: Math.max(page, Math.ceil(total / limit)),
+      total,
+      notice: "",
+    };
+  }
+
+  function normalizeLoc(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const item = raw.item || {};
+    const url = safeUrl(
+      item.service_medium ||
+        (Array.isArray(raw.image_url) ? raw.image_url[0] : raw.image_url) ||
+        item.thumb_gallery
+    );
+    if (!url) return null;
+    const title = cleanText(raw.title || item.title, 240) || "Library of Congress image";
+    const sourcePage =
+      safeUrl(raw.id) ||
+      safeUrl(item.link) ||
+      (item.control_number
+        ? `https://www.loc.gov/item/${encodeURIComponent(String(item.control_number))}/`
+        : "https://www.loc.gov");
+    const creator =
+      textOf(item.contributors && item.contributors[0], 160) ||
+      textOf(item.creators && item.creators[0] && item.creators[0].title, 160) ||
+      "Unknown";
+    const description = textOf(
+      raw.description || item.summary || item.medium_brief || "",
+      600
+    );
+    const tags = tagList(
+      [
+        ...(Array.isArray(raw.subject) ? raw.subject : []),
+        ...(Array.isArray(item.subjects) ? item.subjects : []),
+        ...titleWords(title, 5),
+      ],
+      12
+    );
+    return remember({
+      provider: "loc",
+      url,
+      thumb: safeUrl(item.thumb_gallery || item.service_low) || url,
+      title,
+      creator,
+      license: "See source",
+      licenseUrl: "",
+      source: "Library of Congress",
+      sourcePage,
+      foreignLandingUrl: sourcePage,
+      domain: "loc.gov",
+      description,
+      width: 0,
+      height: 0,
+      publishedAt: cleanText(raw.date || item.date, 40),
+      tags,
+      meta: {
+        controlNumber: cleanText(String(item.control_number || ""), 40),
+        rights: cleanText(raw.rights || item.rights || "", 160),
+      },
+    });
+  }
+
+  async function locSearch(query, page, signal) {
+    const per = 20;
+    const params = new URLSearchParams({
+      q: query,
+      fo: "json",
+      c: String(per),
+      sp: String(page),
+    });
+    const data = await getJson(`https://www.loc.gov/photos/?${params}`, signal);
+    const items = (data.results || [])
+      .filter((result) => !result.access_restricted)
+      .map(normalizeLoc)
+      .filter(Boolean);
+    const total = Number(data.pagination && data.pagination.total) || items.length;
+    return {
+      provider: "loc",
+      items,
+      page,
+      pageCount: Math.max(page, Math.ceil(total / per)),
+      total,
+      notice: "",
+    };
+  }
+
+  function normalizeArchive(doc) {
+    if (!doc || !doc.identifier) return null;
+    const identifier = cleanText(
+      Array.isArray(doc.identifier) ? doc.identifier[0] : doc.identifier,
+      120
+    );
+    if (!identifier) return null;
+    const url = `https://archive.org/services/img/${encodeURIComponent(identifier)}`;
+    const title = textOf(doc.title, 240) || "Internet Archive image";
+    const sourcePage = `https://archive.org/details/${encodeURIComponent(identifier)}`;
+    const tags = tagList(titleWords(title, 6), 12);
+    return remember({
+      provider: "archive",
+      url,
+      thumb: url,
+      title,
+      creator: textOf(doc.creator, 160) || "Internet Archive",
+      license: "See source",
+      licenseUrl: "",
+      source: "Internet Archive",
+      sourcePage,
+      foreignLandingUrl: sourcePage,
+      domain: "archive.org",
+      description: textOf(doc.description, 600),
+      width: 0,
+      height: 0,
+      publishedAt: cleanText(doc.date, 40),
+      tags,
+      meta: {
+        identifier,
+        mediatype: cleanText(doc.mediatype, 40),
+      },
+    });
+  }
+
+  async function archiveSearch(query, page, signal) {
+    const rows = 20;
+    const params = new URLSearchParams({
+      q: `${query} AND mediatype:image`,
+      rows: String(rows),
+      page: String(page),
+      output: "json",
+    });
+    for (const field of ["identifier", "title", "creator", "date", "description", "mediatype"]) {
+      params.append("fl[]", field);
+    }
+    const data = await getJson(`https://archive.org/advancedsearch.php?${params}`, signal);
+    const response = (data && data.response) || {};
+    const items = (response.docs || []).map(normalizeArchive).filter(Boolean);
+    const total = Number(response.numFound) || items.length;
+    return {
+      provider: "archive",
+      items,
+      page,
+      pageCount: Math.max(page, Math.ceil(total / rows)),
+      total,
+      notice: "",
+    };
+  }
+
+  function normalizeMeme(raw) {
+    if (!raw || !raw.url || raw.nsfw || raw.spoiler) return null;
+    const url = safeUrl(raw.url);
+    if (!url || /(^|\.)v\.redd\.it$/i.test(new URL(url).hostname) || /\.mp4($|\?)/i.test(url)) {
+      return null;
+    }
+    const thumb = safeUrl(Array.isArray(raw.preview) ? raw.preview[0] : raw.preview) || url;
+    const title = cleanText(raw.title, 240) || "Meme";
+    const sourcePage = safeUrl(raw.postLink) || "https://www.reddit.com";
+    const subreddit = cleanText(raw.subreddit, 40) || "memes";
+    const tags = tagList([subreddit, ...titleWords(title, 6)], 12);
+    return remember({
+      provider: "meme",
+      url,
+      thumb,
+      title,
+      creator: cleanText(raw.author, 160) ? `u/${cleanText(raw.author, 160)}` : `r/${subreddit}`,
+      license: "See source",
+      licenseUrl: "",
+      source: `Reddit · r/${subreddit}`,
+      sourcePage,
+      foreignLandingUrl: sourcePage,
+      domain: "reddit.com",
+      description: "",
+      width: 0,
+      height: 0,
+      publishedAt: "",
+      tags,
+      meta: {
+        subreddit,
+        ups: Number(raw.ups) || 0,
+      },
+    });
+  }
+
+  async function memeSearch(query, page, signal) {
+    const requested = String(query || "").toLowerCase().replace(/^r\//, "");
+    const preferred = MEME_SUBREDDITS.includes(requested) ? requested : "";
+    /* A single dead or renamed subreddit should not cool down the whole meme
+       source. Try a few before giving up. */
+    const candidates = [
+      ...(preferred ? [preferred] : []),
+      ...shuffle(MEME_SUBREDDITS.filter((name) => name !== preferred)),
+    ].slice(0, 3);
+    let lastError = null;
+    for (const subreddit of candidates) {
+      try {
+        const data = await getJson(
+          `https://meme-api.com/gimme/${encodeURIComponent(subreddit)}/20`,
+          signal
+        );
+        const items = (data.memes || []).map(normalizeMeme).filter(Boolean);
+        if (!items.length) continue;
+        return {
+          provider: "meme",
+          items,
+          page,
+          pageCount: page + 1,
+          total: items.length,
+          notice: preferred
+            ? ""
+            : "Meme Stream pulls from a rotating public subreddit, so it is a wildcard rather than a keyword match.",
+        };
+      } catch (error) {
+        if (error.name === "AbortError") throw error;
+        lastError = error;
+      }
+    }
+    throw lastError || new ApiError("The meme stream had nothing to offer.");
+  }
+
+  async function commonsRandomSearch(query, page, signal) {
+    const params = new URLSearchParams({
+      action: "query",
+      generator: "random",
+      grnnamespace: "6",
+      grnlimit: "20",
+      prop: "imageinfo|categories",
+      iiprop: "url|extmetadata|size|mime",
+      iiurlwidth: "800",
+      iiextmetadatafilter:
+        "LicenseShortName|Artist|Credit|LicenseUrl|ImageDescription|ObjectName|Attribution|DateTimeOriginal",
+      cllimit: "12",
+      format: "json",
+      formatversion: "2",
+      origin: "*",
+    });
+    const data = await getJson(`${WIKI_API}?${params}`, signal);
+    const pages = data && data.query && Array.isArray(data.query.pages) ? data.query.pages : [];
+    const items = pages
+      .filter((page) => {
+        const info = page.imageinfo && page.imageinfo[0];
+        if (!info) return false;
+        if (!/^image\/(jpeg|png|webp|gif)$/i.test(info.mime || "")) return false;
+        if (info.width && info.height && info.width < 500 && info.height < 500) return false;
+        const title = String(page.title || "").toLowerCase();
+        return !/(map|diagram|chart|logo|icon|flag|coat of arms|seal|signature|graph|plot|screenshot|document|poster|cover|book|page|text|scan)/i.test(
+          title
+        );
+      })
+      .map(normalizeWikimedia)
+      .filter(Boolean);
+    return {
+      provider: "wikimedia",
+      items,
+      page,
+      pageCount: page + 1,
+      total: items.length,
+      notice: "",
+    };
+  }
+
+  async function runSourceSearch(id, query, page, signal) {
+    switch (id) {
+      case "openverse":
+        return openverseSearch(query, page, signal);
+      case "wikimedia":
+        return wikimediaSearch(query, page, signal);
+      case "artic":
+        return aicSearch(query, page, signal);
+      case "met":
+        return metSearch(query, page, signal);
+      case "vam":
+        return vamSearch(query, page, signal);
+      case "arena":
+        return arenaSearch(query, page, signal);
+      case "nasa":
+        return nasaSearch(query, page, signal);
+      case "meme":
+        return memeSearch(query, page, signal);
+      case "loc":
+        return locSearch(query, page, signal);
+      case "archive":
+        return archiveSearch(query, page, signal);
+      case "commonsRandom":
+        return commonsRandomSearch(query, page, signal);
+      default:
+        throw new Error(`Unknown image source: ${id}`);
     }
   }
 
-  async function searchAllSourcesPage(query, page = 1, signal) {
+  const sourceHealth = new Map();
+  const SOURCE_COOLDOWN_MS = 45000;
+  const SOURCE_RATE_COOLDOWN_MS = 90000;
+
+  function sourceIsCooling(id) {
+    const entry = sourceHealth.get(id);
+    return Boolean(entry && entry.until > Date.now());
+  }
+
+  function sourceMarkFailure(id, error) {
+    const entry = sourceHealth.get(id) || { failures: 0, until: 0, reason: "" };
+    entry.failures += 1;
+    const rateLimited =
+      (error && error.status === 429) || /rate|limit|too many/i.test(String(error && error.message));
+    const base = rateLimited ? SOURCE_RATE_COOLDOWN_MS : SOURCE_COOLDOWN_MS;
+    entry.until = Date.now() + base * Math.min(3, entry.failures);
+    entry.reason = cleanText((error && error.message) || "unavailable", 120);
+    sourceHealth.set(id, entry);
+  }
+
+  function sourceMarkSuccess(id) {
+    sourceHealth.delete(id);
+  }
+
+  function weightedSample(ids, count, used = new Set()) {
+    const pool = ids.filter((id) => SOURCE_META[id] && !sourceIsCooling(id));
+    const picked = [];
+    while (picked.length < count && pool.length) {
+      let total = 0;
+      for (const id of pool) {
+        total += (SOURCE_META[id].weight || 1) * (used.has(id) ? 0.35 : 1);
+      }
+      let roll = Math.random() * total;
+      let chosen = pool[0];
+      for (const id of pool) {
+        roll -= (SOURCE_META[id].weight || 1) * (used.has(id) ? 0.35 : 1);
+        if (roll <= 0) {
+          chosen = id;
+          break;
+        }
+      }
+      picked.push(chosen);
+      pool.splice(pool.indexOf(chosen), 1);
+    }
+    return picked;
+  }
+
+  async function searchImages(query, page = 1, signal, group = "all") {
+    return searchAllSourcesPage(query, page, signal, group);
+  }
+
+  async function searchAllSourcesPage(query, page = 1, signal, group = "all") {
     const safePage = Math.max(1, Number(page) || 1);
-    const key = `all:${String(query).toLowerCase()}:${safePage}`;
+    const safeGroup = SOURCE_GROUPS[group] ? group : "all";
+    const key = `all:${safeGroup}:${String(query).toLowerCase()}:${safePage}`;
     if (searchCache.has(key)) return searchCache.get(key);
 
-    const settled = await Promise.allSettled([
-      openverseSearch(query, safePage, signal),
-      wikimediaSearch(query, safePage, signal),
-    ]);
+    const requested = SOURCE_GROUPS[safeGroup];
+    const available = requested.filter((id) => !sourceIsCooling(id));
+    if (!available.length) {
+      throw new ApiError("Every source is resting for a moment. Try again shortly.", 429);
+    }
+
+    const settled = await Promise.allSettled(
+      available.map(async (id) => {
+        const deadline = AbortSignal.timeout(SEARCH_SOURCE_DEADLINE_MS);
+        const combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
+        return { id, result: await runSourceSearch(id, query, safePage, combined) };
+      })
+    );
     if (signal && signal.aborted) throw new DOMException("Aborted", "AbortError");
 
-    const items = [];
-    const seen = new Set();
+    const groups = [];
     const notices = [];
+    const failed = [];
     let successes = 0;
     let pageCount = safePage;
     let total = 0;
-    for (const result of settled) {
-      if (result.status !== "fulfilled") continue;
-      successes += 1;
-      pageCount = Math.max(pageCount, Number(result.value.pageCount) || safePage);
-      total += Number(result.value.total) || 0;
-      for (const item of result.value.items || []) {
-        if (!item || !item.url || seen.has(item.url)) continue;
-        seen.add(item.url);
-        items.push(item);
+    let lastError = null;
+
+    for (let index = 0; index < settled.length; index += 1) {
+      const id = available[index];
+      const outcome = settled[index];
+      if (outcome.status === "fulfilled" && outcome.value && outcome.value.result) {
+        const result = outcome.value.result;
+        sourceMarkSuccess(id);
+        successes += 1;
+        pageCount = Math.max(pageCount, Number(result.pageCount) || safePage);
+        total += Number(result.total) || 0;
+        if (result.notice) notices.push(result.notice);
+        groups.push({ seed: id, items: result.items || [] });
+      } else {
+        const reason = outcome.status === "rejected" ? outcome.reason : null;
+        lastError = reason || lastError;
+        sourceMarkFailure(id, reason);
+        failed.push(SOURCE_META[id] ? SOURCE_META[id].label : id);
       }
     }
+
     if (!successes) {
-      const reason = settled.find((result) => result.status === "rejected");
-      throw (reason && reason.reason) || new Error("No image sources answered.");
+      throw lastError || new Error("No image sources answered.");
     }
+
+    const itemCount = groups.reduce((count, group) => count + group.items.length, 0);
+    const items = mixImages(groups, { limit: Math.max(1, itemCount) });
     if (successes === 1) notices.push("Only one image source answered. Results may be thinner.");
+    if (failed.length) {
+      notices.push(
+        `${failed.slice(0, 4).join(", ")} ${failed.length === 1 ? "is" : "are"} resting. Sift used the other sources.`
+      );
+    }
+
     const result = {
-      provider: "all",
+      provider: safeGroup,
       items,
       page: safePage,
       pageCount,
       total,
-      notice: notices.join(" "),
+      notice: Array.from(new Set(notices)).join(" "),
     };
     cacheSet(searchCache, key, result);
     return result;
   }
 
-  async function searchAllSources(query, signal) {
-    return searchAllSourcesPage(query, 1, signal);
+  async function searchAllSources(query, signal, group = "related") {
+    return searchAllSourcesPage(query, 1, signal, group);
   }
 
   function bufferMatchesTags(tags, limit = 16) {
@@ -1196,13 +2250,15 @@
       error: "",
       notice: "",
       anchor: null,
-      tagIndex: 0,
-      pageByTag: Object.create(null),
-      doneTags: new Set(),
+      seedIndex: 0,
+      pageBySeed: Object.create(null),
+      doneSeeds: new Set(),
       seen: new Set(),
       saved: new Set(),
       exhausted: false,
-      activeTag: "",
+      activeTags: [],
+      recentSeeds: [],
+      recent: [],
       batch: 0,
     };
   }
@@ -1226,6 +2282,7 @@
       error: "",
       notice: "",
       source: "",
+      group: "all",
     },
     feed: createFeedState(),
     boardRelated: {
@@ -1582,56 +2639,96 @@
   }
 
   function feedSeedPlan() {
+    const mixKey = MIX_MODES[state.prefs.mix] ? state.prefs.mix : "curious";
+    const mix = MIX_MODES[mixKey];
     const names = [];
-    const nameSet = new Set();
+    const seen = new Set();
     for (const board of state.boards) {
       if (board.privacy === "private" || board.system === "likes") continue;
       const name = cleanText(board.name, 80).toLowerCase();
-      if (!usefulSeed(name) || nameSet.has(name)) continue;
-      nameSet.add(name);
+      if (!usefulSeed(name) || seen.has(name)) continue;
+      seen.add(name);
       names.push(name);
+    }
+
+    const boardSeeds = [];
+    for (const board of state.boards) {
+      if (board.privacy === "private" || board.system === "likes") continue;
+      for (const seed of board.seeds || []) {
+        const value = cleanText(seed, 80).toLowerCase();
+        if (!usefulSeed(value) || seen.has(value)) continue;
+        seen.add(value);
+        boardSeeds.push(value);
+      }
     }
 
     const tags = [];
     for (const tag of masterTags(MAX_MASTER_TAGS)) {
-      if (!tag.value || nameSet.has(tag.value) || !usefulSeed(tag.value)) continue;
-      tags.push(tag.value);
+      const value = cleanText(tag.value, 80).toLowerCase();
+      if (!value || seen.has(value) || !usefulSeed(value)) continue;
+      seen.add(value);
+      tags.push(value);
     }
 
-    const seeds = Array.from(new Set([...names, ...tags]));
-    const schedule = [];
-    for (let round = 0; round < BOARD_NAME_WEIGHT; round += 1) {
-      for (const name of names) schedule.push(name);
-    }
-    for (const tag of tags) schedule.push(tag);
+    const wildcards = shuffle(
+      DRIFT_SEEDS.filter((seed) => !seen.has(seed.toLowerCase()))
+    ).slice(0, mix.wildcards);
 
-    if (!schedule.length) {
+    const weighted = [];
+    for (const name of names) {
+      for (let round = 0; round < BOARD_NAME_WEIGHT; round += 1) {
+        weighted.push({ value: name, kind: "board" });
+      }
+    }
+    for (const seed of boardSeeds) {
+      for (let round = 0; round < 2; round += 1) weighted.push({ value: seed, kind: "seed" });
+    }
+    for (const tag of tags) weighted.push({ value: tag, kind: "tag" });
+    for (const wildcard of wildcards) {
+      for (let round = 0; round < Math.max(1, mix.wildcardWeight); round += 1) {
+        weighted.push({ value: wildcard, kind: "wild" });
+      }
+    }
+
+    if (!weighted.length) {
       const publicBoards = state.boards.filter(
         (board) => board.privacy !== "private" && (board.pins.length || board.seeds.length)
       );
       const fallback = publicBoards
         .flatMap((board) => [...(board.seeds || []), ...titleWords(board.name, 2)])
-        .filter(usefulSeed);
+        .filter(usefulSeed)
+        .map((value) => cleanText(value, 80).toLowerCase());
+      const unique = Array.from(new Set(fallback)).slice(0, MAX_MASTER_TAGS);
       return {
-        seeds: Array.from(new Set(fallback)).slice(0, MAX_MASTER_TAGS),
-        schedule: Array.from(new Set(fallback)).slice(0, MAX_MASTER_TAGS),
+        seeds: unique,
+        schedule: unique.map((value) => ({ value, kind: "seed" })),
       };
     }
 
+    // Keep the first impression close to the user's own boards, then let the
+    // weighted, shuffled schedule take over.
+    const leadValues = shuffle(names).slice(0, Math.min(2, names.length));
+    const lead = leadValues.map((value) => ({ value, kind: "board" }));
+    const rest = shuffle(weighted.filter((entry) => !leadValues.includes(entry.value)));
+    const schedule = [...lead, ...rest];
+    const seeds = Array.from(new Set(schedule.map((entry) => entry.value)));
     return { seeds, schedule };
   }
 
   function feedSignature() {
-    return state.boards
-      .map(
-        (board) =>
-          `${board.id}:${board.name}:${board.privacy}:${board.pins.length}:${board.seeds.join(",")}:${(
-            board.tags || []
-          )
-            .map((tag) => `${tag.value}:${tag.count}:${tag.lastUsedAt}`)
-            .join(",")}`
-      )
-      .join("|") + `|web:${webBufferSignature()}`;
+    return (
+      state.boards
+        .map(
+          (board) =>
+            `${board.id}:${board.name}:${board.privacy}:${board.pins.length}:${board.seeds.join(",")}:${(
+              board.tags || []
+            )
+              .map((tag) => `${tag.value}:${tag.count}:${tag.lastUsedAt}`)
+              .join(",")}`
+        )
+        .join("|") +
+      `|mix:${state.prefs.mix || "curious"}|web:${webBufferSignature()}`
+    );
   }
 
   function buildInterestProfile(boards = state.boards) {
@@ -1654,20 +2751,22 @@
   function feedSentinelHTML() {
     if (ui.feed.exhausted) {
       return `<div class="feed-end">
-        <p>Sift has walked every board name, tag, and page it can reach right now.</p>
+        <p>Sift has walked every seed and page it can reach right now. The mix will be different next time.</p>
         <button class="btn btn-quiet btn-small" type="button" data-action="refresh-feed">${icon("shuffle")}Start a new orbit</button>
       </div>`;
     }
+    const active = ui.feed.activeTags.slice(0, 2).map((tag) => `“${tag}”`).join(", ");
+    const extra = Math.max(0, ui.feed.activeTags.length - 2);
     const label = ui.feed.loadingMore
-      ? "Loading more from your boards and tags…"
-      : ui.feed.activeTag
-        ? `Next after “${ui.feed.activeTag}”`
-        : "Load more from your boards and tags";
+      ? "Mixing another handful of threads…"
+      : active
+        ? `Mix more after ${active}${extra ? ` + ${extra} more` : ""}`
+        : "Load more from your boards, seeds, and tags";
     return `<div class="feed-sentinel" data-feed-sentinel>
       <button class="btn btn-quiet" type="button" data-action="load-more-feed" ${
         ui.feed.loadingMore ? "disabled" : ""
       }>${icon("shuffle")}${esc(label)}</button>
-      <p>Scroll to keep rotating through your board names, tags, and their result pages.</p>
+      <p>Scroll to keep mixing board names, board seeds, tags, and the occasional wildcard.</p>
     </div>`;
   }
 
@@ -1681,7 +2780,9 @@
     }
 
     if (ui.feed.loading && !ui.feed.items.length) {
-      return `<div class="loading-copy" style="margin-bottom:18px">Gathering a few quiet things</div>${skeletonHTML(9)}`;
+      return `<div class="loading-copy" style="margin-bottom:18px">Gathering a few threads and shuffling them</div>${skeletonHTML(
+        9
+      )}`;
     }
 
     if (!ui.feed.items.length) {
@@ -1701,19 +2802,21 @@
   }
 
   function feedSectionHTML() {
+    const mixKey = MIX_MODES[state.prefs.mix] ? state.prefs.mix : "curious";
+    const chips = ui.feed.activeTags.length ? ui.feed.activeTags : ui.feed.seeds.slice(0, 8);
     return `<section>
       <div class="section-head">
         <div>
           <p class="eyebrow">From your orbit</p>
-          <h2>More like what you kept.</h2>
-          <p>A rotating feed built from your public board names first, then the tags you keep. Board names lead the rotation; tags appear at a lower frequency. Nothing is saved until you choose it.</p>
+          <h2>More like what you kept, less like a loop.</h2>
+          <p>A topically shuffled feed built from your public board names, board seeds, and tags. Each batch mixes several threads at once, so one search term never owns the page. Wildcards keep the edges soft. Nothing is saved until you choose it.</p>
           ${
-            ui.feed.seeds.length
-              ? `<div class="seed-row">${ui.feed.seeds
-                  .slice(0, 8)
+            chips.length
+              ? `<div class="seed-row">${chips
+                  .slice(0, 10)
                   .map(
                     (seed) =>
-                      `<span class="seed-chip${seed === ui.feed.activeTag ? " is-active" : ""}">${esc(
+                      `<span class="seed-chip${ui.feed.activeTags.includes(seed) ? " is-active" : ""}">${esc(
                         seed
                       )}</span>`
                   )
@@ -1722,6 +2825,22 @@
           }
         </div>
         <div class="section-actions">
+          <div class="feed-mix" role="group" aria-label="Feed mix">
+            ${Object.entries(MIX_MODES)
+              .map(
+                ([key, mode]) =>
+                  `<button class="mix-chip${key === mixKey ? " is-active" : ""}" type="button" data-action="feed-mix" data-mix="${esc(
+                    key
+                  )}" title="${esc(
+                    key === "calm"
+                      ? "Stay close to your boards and tags"
+                      : key === "curious"
+                        ? "Mix in a few wildcards"
+                        : "Pull harder from memes, random archives, and the open web"
+                  )}">${esc(mode.label)}</button>`
+              )
+              .join("")}
+          </div>
           <button class="icon-action" type="button" data-action="refresh-feed" ${
             ui.feed.loading || ui.feed.loadingMore ? "disabled" : ""
           }>${icon("shuffle")}Shuffle</button>
@@ -1757,65 +2876,166 @@
     document.title = "Sift — your field";
   }
 
-  function nextFeedTag() {
-    const seeds = ui.feed.schedule.length ? ui.feed.schedule : ui.feed.seeds;
-    if (!seeds.length) return null;
-    for (let attempt = 0; attempt < seeds.length; attempt += 1) {
-      const index = ui.feed.tagIndex % seeds.length;
-      const tag = seeds[index];
-      ui.feed.tagIndex = (index + 1) % seeds.length;
-      if (!tag || ui.feed.doneTags.has(tag)) continue;
-      return { tag, page: (ui.feed.pageByTag[tag] || 0) + 1 };
+  function nextFeedSeeds(count) {
+    const schedule = ui.feed.schedule;
+    if (!schedule.length) return [];
+    const picks = [];
+    const picked = new Set();
+    const recent = new Set(ui.feed.recentSeeds);
+
+    for (let attempt = 0; attempt < schedule.length * 2 && picks.length < count; attempt += 1) {
+      const index = ui.feed.seedIndex % schedule.length;
+      const entry = schedule[index];
+      ui.feed.seedIndex = (index + 1) % schedule.length;
+      if (!entry || !entry.value || ui.feed.doneSeeds.has(entry.value) || picked.has(entry.value)) continue;
+      if (recent.has(entry.value) && picks.length + 1 < count) continue;
+      picked.add(entry.value);
+      picks.push({ ...entry, page: (ui.feed.pageBySeed[entry.value] || 0) + 1 });
     }
-    return null;
+
+    if (picks.length < count) {
+      for (let attempt = 0; attempt < schedule.length && picks.length < count; attempt += 1) {
+        const index = ui.feed.seedIndex % schedule.length;
+        const entry = schedule[index];
+        ui.feed.seedIndex = (index + 1) % schedule.length;
+        if (!entry || !entry.value || ui.feed.doneSeeds.has(entry.value) || picked.has(entry.value)) continue;
+        picked.add(entry.value);
+        picks.push({ ...entry, page: (ui.feed.pageBySeed[entry.value] || 0) + 1 });
+      }
+    }
+
+    return picks;
   }
 
-  async function loadFeedBatch() {
-    if (!ui.feed.seeds.length) return { added: 0, error: "" };
+  function feedSourcePool(entry, mixKey) {
+    if (entry.kind === "wild") {
+      return ["commonsRandom", "meme", "arena", "nasa", "artic", "vam", "openverse", "wikimedia"];
+    }
+    if (mixKey === "calm") {
+      return ["openverse", "wikimedia", "artic", "met", "vam", "arena", "nasa", "loc", "archive"];
+    }
+    return ["openverse", "wikimedia", "artic", "met", "vam", "arena", "nasa", "loc", "archive", "meme"];
+  }
+
+  let feedGeneration = 0;
+
+  async function loadFeedBatch(generation = feedGeneration) {
+    if (!ui.feed.seeds.length || generation !== feedGeneration) return { added: 0, error: "" };
+    const mixKey = MIX_MODES[state.prefs.mix] ? state.prefs.mix : "curious";
+    const mix = MIX_MODES[mixKey];
     const notices = [];
     let lastError = "";
 
     for (let attempt = 0; attempt < FEED_MAX_ATTEMPTS; attempt += 1) {
-      const pick = nextFeedTag();
-      if (!pick) {
+      if (generation !== feedGeneration) return { added: 0, error: "" };
+      const picks = nextFeedSeeds(mix.seedsPerBatch);
+      if (!picks.length) {
         ui.feed.exhausted = true;
         break;
       }
 
-      ui.feed.activeTag = pick.tag;
-      const buffered = bufferMatchesTags([pick.tag], 10);
-      let result;
-      try {
-        result = await searchAllSourcesPage(pick.tag, pick.page);
-      } catch (error) {
-        if (error.name === "AbortError") throw error;
-        lastError = error.message || "The image sources did not answer.";
-        if (result && result.notice) notices.push(result.notice);
-        continue;
-      }
+      ui.feed.activeTags = picks.map((pick) => pick.value);
+      const usedSources = new Set();
+      const plans = picks.map((pick) => {
+        const buffered = bufferMatchesTags([pick.value], 4);
+        const sources = weightedSample(
+          feedSourcePool(pick, mixKey),
+          mix.sourcesPerSeed,
+          usedSources
+        );
+        for (const source of sources) usedSources.add(source);
+        return { pick, buffered, sources };
+      });
 
-      if (result.notice) notices.push(result.notice);
-      ui.feed.pageByTag[pick.tag] = pick.page;
-      const pageCount = Number(result.pageCount) || pick.page;
-      if (pick.page >= pageCount) ui.feed.doneTags.add(pick.tag);
+      /* Fetch the chosen seeds in parallel. Previously each seed waited for the
+         previous one, so a single slow API could hold up the whole batch. */
+      const outcomes = await Promise.all(
+        plans.map(async (plan) => {
+          if (generation !== feedGeneration) return null;
+          const groups = [];
+          if (plan.buffered.length) {
+            groups.push({ seed: `${plan.pick.value}:buffer`, items: plan.buffered });
+          }
+          if (!plan.sources.length) {
+            return {
+              plan,
+              groups,
+              seedSuccess: false,
+              pageCount: plan.pick.page,
+              notices: ["Every source is resting for a moment."],
+            };
+          }
 
-      const added = [];
-      for (const group of [buffered, result.items || []]) {
-        for (const item of group) {
-          if (!item || !item.url) continue;
-          if (ui.feed.saved.has(item.url) || ui.feed.seen.has(item.url)) continue;
-          ui.feed.seen.add(item.url);
-          added.push(item);
-          if (added.length >= FEED_BATCH) break;
+          const settled = await Promise.allSettled(
+            plan.sources.map(async (id) => ({
+              id,
+              result: await runSourceSearch(
+                id,
+                plan.pick.value,
+                plan.pick.page,
+                AbortSignal.timeout(FEED_SOURCE_DEADLINE_MS)
+              ),
+            }))
+          );
+          if (generation !== feedGeneration) return null;
+
+          const items = [];
+          const planNotices = [];
+          let pageCount = plan.pick.page;
+          let seedSuccess = false;
+          for (let index = 0; index < settled.length; index += 1) {
+            const id = plan.sources[index];
+            const outcome = settled[index];
+            if (outcome.status === "fulfilled" && outcome.value && outcome.value.result) {
+              const result = outcome.value.result;
+              sourceMarkSuccess(id);
+              seedSuccess = true;
+              pageCount = Math.max(pageCount, Number(result.pageCount) || plan.pick.page);
+              if (result.notice) planNotices.push(result.notice);
+              for (const item of result.items || []) if (item && item.url) items.push(item);
+            } else {
+              const reason = outcome.status === "rejected" ? outcome.reason : null;
+              lastError = (reason && reason.message) || lastError;
+              sourceMarkFailure(id, reason);
+            }
+          }
+          if (items.length) groups.push({ seed: plan.pick.value, items });
+          return { plan, groups, seedSuccess, pageCount, notices: planNotices };
+        })
+      );
+      if (generation !== feedGeneration) return { added: 0, error: "" };
+
+      const groups = [];
+      let seedSuccesses = 0;
+      for (const outcome of outcomes) {
+        if (!outcome) continue;
+        groups.push(...outcome.groups);
+        notices.push(...outcome.notices);
+        if (outcome.seedSuccess) {
+          seedSuccesses += 1;
+          ui.feed.pageBySeed[outcome.plan.pick.value] = outcome.plan.pick.page;
+          if (outcome.plan.pick.page >= outcome.pageCount) {
+            ui.feed.doneSeeds.add(outcome.plan.pick.value);
+          }
         }
-        if (added.length >= FEED_BATCH) break;
       }
 
-      if (added.length) {
-        ui.feed.items.push(...added);
+      if (!seedSuccesses && !groups.some((group) => group.items.length)) continue;
+
+      if (generation !== feedGeneration) return { added: 0, error: "" };
+      const mixed = mixImages(groups, {
+        limit: FEED_BATCH,
+        seen: ui.feed.seen,
+        saved: ui.feed.saved,
+        recent: ui.feed.recent,
+      });
+      if (mixed.length) {
+        ui.feed.items.push(...mixed);
+        ui.feed.recent = [...ui.feed.recent, ...mixed].slice(-16);
+        ui.feed.recentSeeds = picks.map((pick) => pick.value).slice(-mix.seedsPerBatch);
         ui.feed.batch += 1;
         if (notices.length) ui.feed.notice = Array.from(new Set(notices)).join(" ");
-        return { added: added.length, error: "" };
+        return { added: mixed.length, error: "" };
       }
     }
 
@@ -1829,6 +3049,11 @@
 
     if (!force && ui.feed.items.length && ui.feed.sig === signature && !ui.feed.error) return;
 
+    const gate = await ensureVpnCheck();
+    if (!gate.ok && !gate.acknowledged) return;
+    if (ui.feed.loading) return;
+
+    const generation = ++feedGeneration;
     ui.feed = createFeedState();
     ui.feed.sig = signature;
 
@@ -1848,19 +3073,25 @@
     if (ui.view.name === "home") render();
 
     try {
-      const first = await loadFeedBatch();
+      const first = await loadFeedBatch(generation);
+      if (generation !== feedGeneration) return;
       if (first.error && !ui.feed.items.length) {
-        ui.feed.error = "Sift could not reach the image sources. Check your connection and try again.";
+        ui.feed.error =
+          "Sift could not reach the image sources. Check your connection and your VPN, then try again.";
       } else if (!ui.feed.items.length && !ui.feed.exhausted) {
-        ui.feed.error = "The image sources had nothing new for these tags. Save another image or shuffle the orbit.";
+        ui.feed.error =
+          "The sources had nothing new for this mix. Save another image, change the feed mix, or start a new orbit.";
       }
     } catch (error) {
+      if (generation !== feedGeneration) return;
       if (error.name !== "AbortError") {
         ui.feed.error = "Sift could not reach the image sources. Check your connection and try again.";
       }
     } finally {
-      ui.feed.loading = false;
-      if (ui.view.name === "home") render();
+      if (generation === feedGeneration) {
+        ui.feed.loading = false;
+        if (ui.view.name === "home") render();
+      }
     }
   }
 
@@ -1877,23 +3108,29 @@
 
     ui.feed.loadingMore = true;
     if (ui.view.name === "home") render();
+    const generation = feedGeneration;
 
     try {
-      const result = await loadFeedBatch();
+      const result = await loadFeedBatch(generation);
+      if (generation !== feedGeneration) return;
       if (result.error && !ui.feed.notice) {
         ui.feed.notice = "Some sources are busy right now. Scroll again or shuffle the orbit.";
       }
     } catch (error) {
+      if (generation !== feedGeneration) return;
       if (error.name !== "AbortError") {
         ui.feed.notice = "The image sources paused. Scroll again or shuffle the orbit.";
       }
     } finally {
-      ui.feed.loadingMore = false;
-      if (ui.view.name === "home") render();
+      if (generation === feedGeneration) {
+        ui.feed.loadingMore = false;
+        if (ui.view.name === "home") render();
+      }
     }
   }
 
   function refreshFeed() {
+    feedGeneration += 1;
     ui.feed = createFeedState();
     if (ui.view.name === "home") render();
   }
@@ -1938,11 +3175,26 @@
     </section>`;
   }
 
+  function sourceGroupHTML(current) {
+    return `<div class="source-mix" role="group" aria-label="Source mix">
+      <span class="source-mix-label">${icon("compass")}Source mix</span>
+      <div class="source-mix-buttons">
+        ${SEARCH_GROUPS.map(
+          (group) =>
+            `<button class="source-chip${group.id === current ? " is-active" : ""}" type="button" data-action="search-group" data-group="${esc(
+              group.id
+            )}" title="Search ${esc(group.label.toLowerCase())}">${esc(group.label)}</button>`
+        ).join("")}
+      </div>
+    </div>`;
+  }
+
   function engineStripHTML(query) {
+    const engines = Object.entries(WEB_ENGINES).filter(([, spec]) => spec.featured);
     return `<div class="engine-strip">
-      <div class="engine-strip-label">${icon("spark")}<span>More image sources</span></div>
+      <div class="engine-strip-label">${icon("spark")}<span>Capture from anywhere</span></div>
       <div class="engine-buttons">
-        ${Object.entries(WEB_ENGINES)
+        ${engines
           .map(
             ([key, spec]) => `<button class="engine-btn" type="button" data-action="engine-tab" data-engine="${esc(
               key
@@ -1954,7 +3206,7 @@
       </div>
       <button class="btn btn-quiet btn-small" type="button" data-action="web-capture-help">${icon(
         "link"
-      )}How capture works</button>
+      )}All sources & any page</button>
     </div>`;
   }
 
@@ -1973,9 +3225,9 @@
           <div class="search-context" aria-live="polite">
             ${
               data.loading && !hasResults
-                ? `<span>Searching Openverse and Wikimedia</span>`
+                ? `<span>Mixing open collections, museums, archives, and wildcards</span>`
                 : `<span>${resultCount.toLocaleString()} image${resultCount === 1 ? "" : "s"}</span>${
-                    data.source ? `<span>${esc(data.source)}</span>` : `<span>Openly licensed</span>`
+                    data.source ? `<span>${esc(data.source)}</span>` : `<span>Mixed sources</span>`
                   }<span>No search history</span>`
             }
           </div>
@@ -1986,6 +3238,7 @@
           )}">${icon("plus")}Start a board from this</button>
         </div>
       </header>
+      ${sourceGroupHTML(data.group || "all")}
       ${engineStripHTML(data.query)}
       ${noticeHTML(data.notice)}
       ${
@@ -2038,9 +3291,13 @@
     if (!query) return;
 
     const append = Boolean(options.append);
+    const group = SOURCE_GROUPS[options.group] ? options.group : ui.search.group || "all";
     if (append && (ui.search.loading || ui.search.page >= ui.search.pageCount)) return;
 
     if (!append) {
+      const gate = await ensureVpnCheck();
+      if (!gate.ok && !gate.acknowledged) return;
+
       ui.search.controller?.abort();
       ui.search.controller = new AbortController();
       ui.search = {
@@ -2055,6 +3312,7 @@
         error: "",
         notice: "",
         source: "",
+        group,
       };
       ui.lastQuery = query;
       ui.view = { name: "search", query };
@@ -2062,13 +3320,19 @@
       window.scrollTo({ top: 0, behavior: "auto" });
       render();
     } else {
+      ui.search.group = group;
       ui.search.loading = true;
       render();
     }
 
     const token = ui.search.token;
     try {
-      const result = await searchImages(query, ui.search.page + 1, ui.search.controller.signal);
+      const result = await searchImages(
+        query,
+        ui.search.page + 1,
+        ui.search.controller.signal,
+        group
+      );
       if (token !== ui.search.token) return;
 
       const existing = new Set(ui.search.items.map((item) => item.url));
@@ -2086,8 +3350,8 @@
       ui.search.loading = false;
       ui.search.error =
         error.status === 429
-          ? "Both image sources are limiting requests right now. Wait a minute, then try again."
-          : "Check your connection and try again. The search request did not complete.";
+          ? "The sources are limiting requests right now. Wait a minute, then try again."
+          : "Check your connection and your VPN, then try again. The search request did not complete.";
     }
 
     if (ui.view.name === "search" && ui.view.query === query) render();
@@ -2330,6 +3594,9 @@
       return;
     }
 
+    const gate = await ensureVpnCheck();
+    if (!gate.ok && !gate.acknowledged) return;
+
     if (force || ui.boardRelated.boardId !== board.id) {
       ui.boardRelated.items = [];
       ui.boardRelated.error = "";
@@ -2358,29 +3625,18 @@
     try {
       const settled = await Promise.allSettled(tasks);
       if (token !== ui.boardRelated.token) return;
-      const items = [];
       const notices = [];
-      const groups = [buffered];
+      const groups = [{ seed: "buffer", items: buffered }];
       for (const result of settled) {
         if (result.status !== "fulfilled" || !result.value) continue;
-        groups.push(result.value.items || []);
+        groups.push({ seed: result.value.provider || "source", items: result.value.items || [] });
         if (result.value.notice) notices.push(result.value.notice);
       }
-      const max = Math.max(0, ...groups.map((group) => group.length));
-      for (let index = 0; index < max; index += 1) {
-        for (const group of groups) {
-          if (group[index]) items.push(group[index]);
-        }
-      }
 
-      const seen = new Set();
-      ui.boardRelated.items = items
-        .filter((item) => {
-          if (!item || !item.url || savedUrls.has(item.url) || seen.has(item.url)) return false;
-          seen.add(item.url);
-          return true;
-        })
-        .slice(0, 28);
+      ui.boardRelated.items = mixImages(groups, {
+        limit: 28,
+        saved: savedUrls,
+      });
       ui.boardRelated.notice = Array.from(new Set(notices)).join(" ");
       ui.boardRelated.error = "";
     } catch (error) {
@@ -3632,24 +4888,21 @@
   function webCaptureScraper(config) {
     const cfg = config || {};
     const host = location.hostname.replace(/^www\./, "");
-    const engine =
-      host.includes("duckduckgo") ? "duckduckgo" :
-      host.includes("brave") ? "brave" :
-      host.includes("qwant") ? "qwant" :
-      host.includes("startpage") ? "startpage" :
-      host.includes("bing") ? "bing" :
-      host.includes("ecosia") ? "ecosia" :
-      host.includes("mojeek") ? "mojeek" : "web";
-    const labels = {
-      duckduckgo: "DuckDuckGo",
-      brave: "Brave Search",
-      qwant: "Qwant",
-      startpage: "Startpage",
-      bing: "Bing Images",
-      ecosia: "Ecosia",
-      mojeek: "Mojeek",
-      web: host || "Web",
-    };
+    const engineHosts = cfg.engines || {};
+    let engine = "web";
+    for (const [key, hosts] of Object.entries(engineHosts)) {
+      if (
+        Array.isArray(hosts) &&
+        hosts.some((candidate) => {
+          const clean = String(candidate || "").toLowerCase().replace(/^www\./, "");
+          return clean && (host === clean || host.endsWith("." + clean));
+        })
+      ) {
+        engine = key;
+        break;
+      }
+    }
+    const labels = cfg.labels || {};
     const label = labels[engine] || host || "Web";
     const params = new URLSearchParams(location.search);
     const query = ["q", "query", "text", "search"]
@@ -3693,13 +4946,42 @@
       }
     };
     const skip = /(?:logo|favicon|sprite|avatar|icon|spacer|pixel|transparent|blank|badge|button|loading)/i;
-    const imageSrc = (img) =>
+    const largestFromSrcset = (value) => {
+      const parts = String(value || "")
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean);
+      let best = "";
+      let bestScore = -1;
+      for (const part of parts) {
+        const [url, descriptor] = part.split(/\s+/);
+        if (!url) continue;
+        const match = /(\d+)(w|x)$/.exec(descriptor || "");
+        const score = match ? Number(match[1]) : 1;
+        if (score > bestScore) {
+          bestScore = score;
+          best = url;
+        }
+      }
+      return best;
+    };
+    const lazySrc = (img) =>
       img.dataset.src ||
       img.dataset.original ||
       img.getAttribute("data-lazy-src") ||
-      img.currentSrc ||
-      img.src ||
+      img.getAttribute("data-src") ||
       "";
+    const imageSrc = (img) => {
+      const lazy = lazySrc(img);
+      const current = img.currentSrc || img.src || "";
+      const srcset = largestFromSrcset(
+        img.getAttribute("srcset") || img.getAttribute("data-srcset")
+      );
+      if (lazy && (!current || current.startsWith("data:") || (img.naturalWidth && img.naturalWidth < 60))) {
+        return lazy;
+      }
+      return current || srcset || lazy || "";
+    };
     const stop = new Set(
       "a an and are as at be by for from has have in into is it its of on or the their them then there these this to was were with you your image images photo photos picture pictures search results result".split(" ")
     );
@@ -3777,7 +5059,7 @@
       if (!anchor) return;
       const width = img.naturalWidth || img.width || 0;
       const height = img.naturalHeight || img.height || 0;
-      if (width && height && width < 60 && height < 60) return;
+      if (!lazySrc(img) && width && height && width < 60 && height < 60) return;
       add({
         image: imageSrc(img),
         thumb: imageSrc(img),
@@ -3791,7 +5073,7 @@
     document.querySelectorAll("img").forEach((img) => {
       const width = img.naturalWidth || img.width || 0;
       const height = img.naturalHeight || img.height || 0;
-      if (width && height && width < 100 && height < 100) return;
+      if (!lazySrc(img) && width && height && width < 100 && height < 100) return;
       add({
         image: imageSrc(img),
         thumb: imageSrc(img),
@@ -3817,8 +5099,43 @@
       });
     });
 
+    document.querySelectorAll("picture").forEach((picture) => {
+      const sources = Array.from(picture.querySelectorAll("source[srcset]"));
+      const img = picture.querySelector("img");
+      const best = sources
+        .map((source) => largestFromSrcset(source.getAttribute("srcset")))
+        .filter(Boolean)
+        .sort((a, b) => b.length - a.length)[0];
+      if (!best && !img) return;
+      add({
+        image: best || imageSrc(img),
+        thumb: best || imageSrc(img),
+        page: img && img.closest("a[href]") ? img.closest("a[href]").href : "",
+        title: (img && img.alt) || "",
+      });
+    });
+
+    document.querySelectorAll('a[href]').forEach((anchor) => {
+      if (!/\.(jpe?g|png|gif|webp|avif)(\?|#|$)/i.test(anchor.href)) return;
+      add({
+        image: anchor.href,
+        thumb: anchor.href,
+        page: anchor.href,
+        title: anchor.getAttribute("aria-label") || anchor.title || anchor.textContent,
+      });
+    });
+
+    document.querySelectorAll('meta[property="og:image"], meta[name="twitter:image"], link[rel="image_src"]').forEach((node) => {
+      add({
+        image: node.getAttribute("content") || node.getAttribute("href") || "",
+        thumb: node.getAttribute("content") || node.getAttribute("href") || "",
+        page: location.href,
+        title: document.title,
+      });
+    });
+
     if (!items.length) {
-      alert("No image results were found on this page. Open an image search tab, wait for thumbnails to load, then run the absorber again.");
+      alert("No images were found on this page. Open an image search tab, a subreddit, a museum page, or any page with images, wait for them to load, then run the absorber again.");
       return;
     }
 
@@ -3862,9 +5179,17 @@
   }
 
   function webCaptureBookmarkletCode() {
+    const engines = {};
+    const labels = {};
+    for (const [key, spec] of Object.entries(WEB_ENGINES)) {
+      engines[key] = spec.hosts;
+      labels[key] = spec.label;
+    }
     const config = {
       siftUrl: location.origin + location.pathname,
       siftOrigin: location.origin,
+      engines,
+      labels,
     };
     return `javascript:(${webCaptureScraper.toString()})(${JSON.stringify(config)});void 0`;
   }
@@ -3891,20 +5216,20 @@
     const spec = WEB_ENGINES[engine];
     const query = ui.webCapture.query || ui.search.query || ui.lastQuery;
     body.innerHTML = `
-      <p class="dialog-lede">Search engines do not allow a static page to read their image results directly. This absorber reads only the images already displayed in one engine tab when you click it.</p>
+      <p class="dialog-lede">Search engines and most image sites do not allow a static page to read their results directly. This absorber reads only the images already displayed in the tab where you click it — an image search, a subreddit, a museum page, a portfolio, a shop, or any other page with images.</p>
       <div class="capture-steps">
         <div class="capture-step">
           <span class="capture-num">1</span>
           <div><h3>Put the absorber in your bookmarks bar</h3><p>Drag this button to the bar. If the bar is hidden, show it with your browser's bookmark settings.</p>
             <div class="capture-actions">
-              <a class="btn btn-primary" id="webCaptureBookmarklet" href="#" draggable="true">Absorb image tab</a>
+              <a class="btn btn-primary" id="webCaptureBookmarklet" href="#" draggable="true">Absorb this page</a>
               <button class="btn btn-quiet" type="button" data-action="web-capture-copy">Copy code</button>
             </div>
           </div>
         </div>
         <div class="capture-step">
           <span class="capture-num">2</span>
-          <div><h3>Open an image tab</h3><p>${spec ? `${esc(spec.label)} is ready.` : "Choose an engine."} Search images for the phrase below, then wait for the thumbnails to appear.</p>
+          <div><h3>Open an image tab</h3><p>${spec ? `${esc(spec.label)} is ready.` : "Choose a source, or use any page with images."} Search for the phrase below, scroll until the images you want are visible, then run the absorber.</p>
             <label class="field compact"><span>Image search phrase</span><input id="webCaptureQuery" type="search" maxlength="180" autocomplete="off" spellcheck="false" value="${esc(
               query
             )}" placeholder="e.g. mossy forest"></label>
@@ -3919,10 +5244,10 @@
         </div>
         <div class="capture-step">
           <span class="capture-num">3</span>
-          <div><h3>Click “Absorb image tab” on that engine page</h3><p>Sift opens a receiver, stores every displayed image link and its available metadata, and shows the absorbed set. Nothing is uploaded.</p></div>
+          <div><h3>Click “Absorb this page” on that tab</h3><p>Sift opens a receiver, stores every displayed image link and its available metadata, and shows the absorbed set. Nothing is uploaded.</p></div>
         </div>
       </div>
-      <p class="dialog-note">Only visible thumbnails are absorbed. Scroll the engine results first if you want more. The absorber never reads another site's cookies or private data.</p>`;
+      <p class="dialog-note">Only visible images are absorbed. Scroll the page first if you want more. The absorber reads <code>img</code>, <code>srcset</code>, <code>picture</code>, CSS background images, direct image links, and social preview images. It never reads another site's cookies or private data. For sites that block embedding, open the image itself and use <strong>Add an image link</strong>.</p>`;
     updateWebCaptureBookmarklet();
   }
 
@@ -4509,6 +5834,318 @@
     return true;
   }
 
+  /* ---------------------------------------------------------------------
+     Connection privacy / VPN check
+     --------------------------------------------------------------------- */
+
+  let vpnCheckPromise = null;
+  let vpnDialogResolve = null;
+
+  function loadPrivacyState() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(PRIVACY_KEY) || "{}");
+      return raw && typeof raw === "object" ? raw : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function savePrivacyState(value) {
+    try {
+      localStorage.setItem(PRIVACY_KEY, JSON.stringify(value));
+    } catch {
+      /* the check is a convenience; never block on storage */
+    }
+  }
+
+  function maskIp(value) {
+    const ip = String(value || "");
+    if (!ip) return "";
+    if (ip.includes(":")) return `${ip.split(":").slice(0, 2).join(":")}:…`;
+    return ip.replace(/\.\d+$/, ".x");
+  }
+
+  async function runVpnCheck() {
+    const data = await getJson("https://api.ipquery.io/?format=json");
+    const risk = (data && data.risk) || {};
+    const protectedConnection = Boolean(
+      risk.is_vpn || risk.is_tor || risk.is_proxy || risk.is_datacenter
+    );
+    const kind = risk.is_vpn
+      ? "VPN"
+      : risk.is_tor
+        ? "Tor"
+        : risk.is_proxy
+          ? "Proxy"
+          : risk.is_datacenter
+            ? "Hosting / datacenter"
+            : "Residential";
+    return {
+      checkedAt: nowIso(),
+      ipMasked: maskIp(data && data.ip),
+      protected: protectedConnection,
+      kind,
+      org: cleanText((data && data.isp && (data.isp.org || data.isp.isp)) || "", 120),
+      asn: cleanText(data && data.isp && data.isp.asn, 40),
+      country: cleanText(data && data.location && data.location.country, 60),
+      countryCode: cleanText(data && data.location && data.location.country_code, 8),
+      city: cleanText(data && data.location && data.location.city, 80),
+      riskScore: Number(risk.risk_score) || 0,
+    };
+  }
+
+  function vpnCheckLabel(check) {
+    if (!check || check.error) return "Connection not verified";
+    if (check.protected === true) return `${check.kind} detected`;
+    if (check.protected === false) return "Residential connection";
+    return "Connection not verified";
+  }
+
+  function vpnStatusLine(check) {
+    if (!check || check.error) return check && check.error ? check.error : "No check has run yet.";
+    if (!check.checkedAt) return "No check has run yet.";
+    return [check.org, check.city, check.country, check.ipMasked].filter(Boolean).join(" · ");
+  }
+
+  function renderVpnDialog(check) {
+    const body = $("#vpnBody");
+    const actions = $("#vpnActions");
+    if (!body || !actions) return;
+    const checking = Boolean(check && check.checking);
+    const unknown = checking || !check || check.error || typeof check.protected !== "boolean";
+    const protectedConnection = Boolean(check && check.protected === true);
+    const statusClass = protectedConnection ? "is-good" : unknown ? "is-unknown" : "is-warn";
+    const recheckLabel = check && check.checkedAt ? "Check again" : "Check connection";
+
+    body.innerHTML = `
+      <p class="lede">Sift now reaches museums, archives, meme streams, and open collections directly from your browser. Each of those hosts can see the IP address that asks for an image.</p>
+      <div class="vpn-status ${statusClass}">
+        <span class="vpn-dot" aria-hidden="true"></span>
+        <div>
+          <strong>${checking ? "Checking your connection…" : esc(vpnCheckLabel(check))}</strong>
+          <p>${checking ? "Asking ipquery.io what kind of network this looks like." : esc(vpnStatusLine(check))}</p>
+        </div>
+      </div>
+      <p>${
+        protectedConnection
+          ? "Your connection already looks masked. Sift will use the wider source mix, and the hosts you query will see the VPN or proxy address instead of your home address."
+          : unknown
+            ? "Sift could not classify this connection. Continue only if you are on a VPN or otherwise comfortable with the wider archives seeing your address."
+            : "A VPN keeps your home IP out of those logs. Turn one on, then check again. You can continue without one, but the wider archives will see your address."
+      }</p>
+      <ul class="privacy-list">
+        <li><strong>What Sift sends:</strong> your search phrase goes directly to each source. No Sift server sits in the middle.</li>
+        <li><strong>What Sift stores:</strong> links and metadata stay in this browser. The connection result stays here too.</li>
+        <li><strong>What a VPN changes:</strong> image hosts see the VPN's address instead of yours. It does not hide your search phrase from the source.</li>
+      </ul>
+      <p class="dialog-note">The check asks <a href="https://ipquery.io" target="_blank" rel="noopener noreferrer">ipquery.io</a> for your connection type. That request also sees your IP. Use a VPN before checking if you want even that lookup masked.</p>`;
+
+    actions.innerHTML = `
+      <a class="btn btn-quiet" href="https://www.privacyguides.org/en/vpn/" target="_blank" rel="noopener noreferrer">VPN guide</a>
+      <button class="btn btn-quiet" type="button" data-action="vpn-recheck" ${checking ? "disabled" : ""}>${icon(
+        "shuffle"
+      )}${recheckLabel}</button>
+      ${
+        protectedConnection
+          ? `<button class="btn btn-primary" type="button" data-action="vpn-continue">Use wider sources</button>`
+          : `<button class="btn btn-quiet" type="button" data-action="vpn-cancel" ${
+              checking ? "disabled" : ""
+            }>Not now</button><button class="btn btn-primary" type="button" data-action="vpn-continue" ${
+              checking ? "disabled" : ""
+            }>Continue without VPN</button>`
+      }`;
+  }
+
+  function showVpnDialog(check) {
+    const dialog = $("#vpnDialog");
+    if (!dialog) return Promise.resolve({ ok: true, check });
+    renderVpnDialog(check);
+    if (!dialog.open) dialog.showModal();
+    if (vpnDialogResolve) {
+      const resolve = vpnDialogResolve;
+      vpnDialogResolve = null;
+      resolve({ ok: false, check: loadPrivacyState(), cancelled: true });
+    }
+    return new Promise((resolve) => {
+      vpnDialogResolve = resolve;
+    });
+  }
+
+  function resolveVpnDialog(result) {
+    const resolve = vpnDialogResolve;
+    vpnDialogResolve = null;
+    const dialog = $("#vpnDialog");
+    if (dialog && dialog.open) dialog.close();
+    if (resolve) resolve(result);
+  }
+
+  function acknowledgeVpn() {
+    const stored = loadPrivacyState();
+    const next = { ...stored, acknowledgedAt: nowIso() };
+    savePrivacyState(next);
+    updatePrivacyPill(next);
+    resolveVpnDialog({ ok: true, check: next, acknowledged: true });
+  }
+
+  async function recheckVpn() {
+    renderVpnDialog({ ...loadPrivacyState(), checking: true });
+    try {
+      const check = await runVpnCheck();
+      const stored = loadPrivacyState();
+      const next = { ...check, acknowledgedAt: stored.acknowledgedAt || "" };
+      savePrivacyState(next);
+      updatePrivacyPill(next);
+      renderVpnDialog(next);
+    } catch (error) {
+      const next = {
+        checkedAt: nowIso(),
+        error: error.message || "Could not verify this connection.",
+        protected: null,
+        kind: "Unknown",
+      };
+      savePrivacyState(next);
+      updatePrivacyPill(next);
+      renderVpnDialog(next);
+    }
+  }
+
+  function ensureVpnCheck({ interactive = true } = {}) {
+    const stored = loadPrivacyState();
+    const checkedAt = Date.parse(stored.checkedAt || "");
+    const hasCheck = Number.isFinite(checkedAt);
+    const fresh = hasCheck && Date.now() - checkedAt < VPN_CHECK_TTL;
+    const dialogOpen = () => {
+      const dialog = $("#vpnDialog");
+      return Boolean(dialog && dialog.open);
+    };
+    const ackAt = Date.parse(stored.acknowledgedAt || "");
+    const acknowledged = Number.isFinite(ackAt) && Date.now() - ackAt < VPN_ACK_TTL;
+
+    if (!hasCheck) {
+      /* Never contact an IP service just because the app opened. Ask first. */
+      if (acknowledged) {
+        if (dialogOpen()) renderVpnDialog(stored);
+        return Promise.resolve({ ok: true, check: stored, acknowledged: true });
+      }
+      if (!interactive) return Promise.resolve({ ok: false, check: stored });
+      return showVpnDialog(stored);
+    }
+
+    if (fresh) {
+      if (stored.protected === true) {
+        if (dialogOpen()) renderVpnDialog(stored);
+        return Promise.resolve({ ok: true, check: stored, cached: true });
+      }
+      if (acknowledged) {
+        if (dialogOpen()) renderVpnDialog(stored);
+        return Promise.resolve({ ok: true, check: stored, acknowledged: true, cached: true });
+      }
+      if (!interactive) return Promise.resolve({ ok: false, check: stored });
+      return showVpnDialog(stored);
+    }
+
+    /* A valid acknowledgement covers stale results too: do not keep pinging an
+       IP service in the background after the user has already chosen to go on. */
+    if (acknowledged) {
+      if (dialogOpen()) renderVpnDialog(stored);
+      return Promise.resolve({ ok: true, check: stored, acknowledged: true });
+    }
+
+    if (vpnCheckPromise) return vpnCheckPromise;
+    vpnCheckPromise = (async () => {
+      try {
+        const check = await runVpnCheck();
+        const next = { ...check, acknowledgedAt: stored.acknowledgedAt || "" };
+        savePrivacyState(next);
+        updatePrivacyPill(next);
+        if (check.protected) {
+          showToast(`VPN-like connection detected: ${check.kind}. Wider sources are available.`, {
+            duration: 6000,
+          });
+          if (dialogOpen()) renderVpnDialog(next);
+          return { ok: true, check: next };
+        }
+        const ackAt = Date.parse(next.acknowledgedAt || "");
+        if (Number.isFinite(ackAt) && Date.now() - ackAt < VPN_ACK_TTL) {
+          if (dialogOpen()) renderVpnDialog(next);
+          return { ok: true, check: next, acknowledged: true };
+        }
+        if (!interactive) return { ok: false, check: next };
+        return await showVpnDialog(next);
+      } catch (error) {
+        const next = {
+          checkedAt: nowIso(),
+          error: error.message || "Could not verify this connection.",
+          protected: null,
+          kind: "Unknown",
+        };
+        savePrivacyState(next);
+        updatePrivacyPill(next);
+        if (!interactive) return { ok: false, check: next };
+        return await showVpnDialog(next);
+      } finally {
+        vpnCheckPromise = null;
+      }
+    })();
+    return vpnCheckPromise;
+  }
+
+  function openVpnCheck() {
+    const stored = loadPrivacyState();
+    const checkedAt = Date.parse(stored.checkedAt || "");
+    const hasCheck = Number.isFinite(checkedAt);
+    const fresh = hasCheck && Date.now() - checkedAt < VPN_CHECK_TTL;
+    if (fresh || !hasCheck) {
+      showVpnDialog(stored);
+      return;
+    }
+    /* An old result exists, so a click here is an explicit request to refresh it. */
+    const dialog = $("#vpnDialog");
+    renderVpnDialog({ ...stored, checking: true });
+    if (dialog && !dialog.open) dialog.showModal();
+    ensureVpnCheck({ interactive: true });
+  }
+
+  function updatePrivacyPill(check = loadPrivacyState()) {
+    const pill = $("#privacyBtn");
+    if (!pill) return;
+    const label = pill.querySelector("span");
+    if (!label) return;
+    pill.classList.remove("is-protected", "is-exposed", "is-unknown");
+    if (check.protected === true) {
+      label.textContent = "VPN checked";
+      pill.classList.add("is-protected");
+      pill.title = `VPN-like connection detected: ${check.kind}. Click for details.`;
+    } else if (check.protected === false) {
+      label.textContent = "No VPN";
+      pill.classList.add("is-exposed");
+      pill.title = "Sift could not detect a VPN. Click to check your connection.";
+    } else if (check.error) {
+      label.textContent = "Check VPN";
+      pill.classList.add("is-unknown");
+      pill.title = "The connection check failed. Click to try again.";
+    } else {
+      label.textContent = "Check VPN";
+      pill.title = "Check your connection before searching.";
+    }
+
+    const inline = $("#vpnInlineStatus");
+    if (inline) {
+      const ackAt = Date.parse(check.acknowledgedAt || "");
+      const acknowledged = Number.isFinite(ackAt) && Date.now() - ackAt < VPN_ACK_TTL;
+      inline.textContent =
+        check.protected === true
+          ? `${check.kind} detected. ${vpnStatusLine(check)}`
+          : check.protected === false
+            ? `No VPN detected. ${vpnStatusLine(check)}`
+            : check.error
+              ? `Connection not verified: ${check.error}`
+              : acknowledged
+                ? "No connection check has run. You chose to continue without one for now."
+                : "No connection check has run yet.";
+    }
+  }
+
   function eraseEverything() {
     const pins = allPins().length;
     if (!pins && !state.boards.length) {
@@ -4524,8 +6161,10 @@
     }
 
     const theme = state.prefs.theme;
+    const mix = state.prefs.mix;
     state = defaultState();
     state.prefs.theme = theme;
+    state.prefs.mix = mix;
     $("#settingsDialog")?.close();
     $("#privacyDialog")?.close();
     $("#detailDialog")?.close();
@@ -4533,14 +6172,18 @@
     $("#pinterestDialog")?.close();
     $("#pinterestReceiveDialog")?.close();
     $("#webCaptureDialog")?.close();
+    $("#vpnDialog")?.close();
     clearDisplayBuffer();
     try {
       localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(PRIVACY_KEY);
     } catch {
       /* ignore */
     }
+    updatePrivacyPill();
     persist();
     ui.dataVersion += 1;
+    feedGeneration += 1;
     ui.feed = createFeedState();
     searchCache.clear();
     relatedCache.clear();
@@ -4706,7 +6349,22 @@
         $("#importFile")?.click();
         return true;
       case "privacy":
+        updatePrivacyPill();
         $("#privacyDialog")?.showModal();
+        return true;
+      case "vpn-check":
+        $("#privacyDialog")?.close();
+        $("#settingsDialog")?.close();
+        openVpnCheck();
+        return true;
+      case "vpn-recheck":
+        recheckVpn();
+        return true;
+      case "vpn-continue":
+        acknowledgeVpn();
+        return true;
+      case "vpn-cancel":
+        resolveVpnDialog({ ok: false, check: loadPrivacyState(), cancelled: true });
         return true;
       case "pinterest":
         openPinterestDialog();
@@ -4773,7 +6431,23 @@
         return true;
       case "refresh-feed":
         refreshFeed();
+        loadHomeFeed(true);
         return true;
+      case "feed-mix": {
+        const mix = element.dataset.mix || "";
+        if (!MIX_MODES[mix] || state.prefs.mix === mix) return true;
+        state.prefs.mix = mix;
+        persist();
+        refreshFeed();
+        loadHomeFeed(true);
+        return true;
+      }
+      case "search-group": {
+        const group = element.dataset.group || "all";
+        if (!SOURCE_GROUPS[group] || ui.search.group === group) return true;
+        performSearch(ui.search.query || ui.lastQuery, { group });
+        return true;
+      }
       case "load-more-feed":
         loadMoreFeed();
         return true;
@@ -5054,14 +6728,14 @@
 
     $("#settingsBtn")?.addEventListener("click", () => {
       updateSettingsSummary();
+      updatePrivacyPill();
       applyTheme();
       const dialog = $("#settingsDialog");
       if (dialog && !dialog.open) dialog.showModal();
     });
 
     $("#privacyBtn")?.addEventListener("click", () => {
-      const dialog = $("#privacyDialog");
-      if (dialog && !dialog.open) dialog.showModal();
+      openVpnCheck();
     });
 
     const openNewBoard = () => {
@@ -5195,6 +6869,11 @@
         if (dialog.id === "boardDialog") resetBoardDialog();
         if (dialog.id === "detailDialog") ui.detail.token += 1;
         if (dialog.id === "webCaptureDialog") ui.webCapture.waiting = false;
+        if (dialog.id === "vpnDialog" && vpnDialogResolve) {
+          const resolve = vpnDialogResolve;
+          vpnDialogResolve = null;
+          resolve({ ok: false, check: loadPrivacyState(), cancelled: true });
+        }
       });
     });
 
@@ -5208,6 +6887,7 @@
   async function init() {
     applyTheme();
     bindEvents();
+    updatePrivacyPill();
     renderSidebar();
     render();
 

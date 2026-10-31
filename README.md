@@ -2,7 +2,7 @@
 
 **Live:** https://orbitmechanic.github.io/sift/
 
-A private, ad-free image board. Search openly licensed images, absorb the image tab of a web search, save only links and metadata, bring Pinterest boards across, and grow a feed from the tags you actually keep.
+A private, ad-free image board. Search open collections, museums, archives, meme streams, and the wider web; mix a feed that pulls from several threads at once; save only links and metadata; and bring Pinterest boards across. Sift grows from the tags you actually keep.
 
 Sift is a static site: HTML, CSS, and vanilla JavaScript with no build step, no framework, and no backend.
 
@@ -88,12 +88,13 @@ Everything is local to the browser. The archive is saved in IndexedDB (`sift.db`
     }
   ],
   "prefs": {
-    "theme": "auto"
+    "theme": "auto",
+    "mix": "curious"
   }
 }
 ```
 
-Pins contain image URLs and metadata. Sift never downloads image files into the archive and never stores base64 image data. The `provider` field is one of `openverse`, `wikimedia`, `pinterest`, `manual`, or `web`.
+Pins contain image URLs and metadata. Sift never downloads image files into the archive and never stores base64 image data. The `provider` field is one of `openverse`, `wikimedia`, `pinterest`, `manual`, `web`, `artic`, `met`, `vam`, `arena`, `nasa`, `loc`, `archive`, or `meme`. The `mix` preference is `calm`, `curious`, or `wild`.
 
 The archive carries a `savedAt` timestamp so Sift can choose the newer copy when both IndexedDB and the localStorage mirror exist.
 
@@ -119,9 +120,14 @@ Boards imported from Pinterest also carry an optional origin, used to recognize 
 
 ## Home feed and large archives
 
-- The home feed starts with every public board name, in board order. Board names lead the rotation and repeat three times per cycle; image tags follow at a lower frequency. Private board names and tags stay out of feed searches.
-- It pages through each board name and tag instead of stopping at the first result set. A sentinel near the bottom loads the next batch of 36 unique images as you scroll. Already saved links and repeats are skipped. When every reachable board name, tag, and page is exhausted, the feed offers **Start a new orbit**.
-- Openverse is the primary source; Wikimedia Commons is the fallback. Openverse's anonymous limits can pause a long feed, so the next scroll continues from the next board name, tag, or page.
+- The home feed is built from every public board name, board seed, and tag. Private boards stay out of the shared feed and global tag profile.
+- Each batch mixes several seeds at once instead of walking one search term to exhaustion. A weighted sampler chooses seeds, sources, and wildcards; `mixImages()` then interleaves the result with penalties for repeating the same source, domain, or tag. One thread never owns the page.
+- Three mix modes set how far the feed wanders:
+  - **Calm** stays close to your boards and tags, with no wildcards.
+  - **Curious** (default) mixes a few wildcards and pulls from more sources per seed.
+  - **Wild** pulls harder from memes, random Commons discoveries, and the open web.
+- The feed pages through each seed instead of stopping at the first result set. A sentinel near the bottom loads the next batch of 36 unique images as you scroll. Already saved links and recent repeats are skipped. When every reachable seed and page is exhausted, the feed offers **Start a new orbit**.
+- Source health is tracked in memory. A failing source gets a short cooldown (45 seconds, longer after rate limits), so one dead API does not stall the whole mix. Feed sources also get a 5-second deadline per batch; search gets 8 seconds per source.
 - Board pages and **All saved** render 60 links at a time and load the next 60 when their sentinel comes into view. The full archive stays in state and IndexedDB, so large collections do not have to create every card at once.
 
 ## Pinterest import
@@ -149,34 +155,49 @@ Pinterest's internal web endpoints are unofficial and may change. If an import s
 
 ## Web image capture
 
-Search engines do not send `Access-Control-Allow-Origin` for their image-result APIs, so a static page cannot fetch them directly. Openverse and Wikimedia Commons do allow direct search; the other engines need a deliberate click.
+Search engines and many art sites do not send `Access-Control-Allow-Origin` for their image results, so a static page cannot fetch them directly. The direct APIs listed below cover the open collections, museums, archives, and meme stream. For everything else, Sift uses a deliberate click.
 
-1. Search in Sift, then choose **DuckDuckGo**, **Brave Search**, **Qwant**, **Startpage**, **Bing Images**, **Ecosia**, or **Mojeek** from the source strip.
+1. Search in Sift, then choose an engine from the **Capture from anywhere** strip: DuckDuckGo, Bing Images, Google Images, Reddit, Giphy, ArtStation, Are.na, Pinterest, Unsplash, or Pexels.
 2. Install the **Absorb image tab** bookmarklet once by dragging it to your bookmarks bar.
-3. On the engine's image tab, wait for thumbnails, then click the absorber.
+3. On the image tab, wait for thumbnails, then click the absorber.
 4. Sift opens a receiver, stores every displayed image link and its available metadata, and shows the absorbed set.
+
+The same absorber also works on Brave Search, Qwant, Startpage, Ecosia, Mojeek, Yandex, Flickr, Imgur, Tenor, Tumblr, Bluesky, DeviantArt, Cosmos, 9GAG, Know Your Meme, and Pixabay. It recognizes each host from the page URL, reads `src`, `srcset`, `<picture>` sources, direct image links, and Open Graph or Twitter card images. That makes it useful on most image-heavy pages, not only the engines in the strip.
 
 The absorber reads only images already displayed on that page. It does not read cookies, private data, or results behind a login. Links land in the displayed-link buffer and can be saved to any board. Some engines may block pop-ups or isolate the opened tab; allow pop-ups for the engine and retry. The absorber retries its hand-off for about 15 seconds.
 
 ## Privacy
 
 - No accounts, analytics, cookies, tracking pixels, or third-party scripts.
-- Search queries are sent directly from the browser to Openverse and Wikimedia Commons.
+- Search queries are sent directly from the browser to the sources you choose. There is no Sift server in the middle.
+- Every source sees an IP address. Image hosts and APIs can see the address that requests a page or a picture, even with `no-referrer` set. A VPN puts the VPN's address in those logs instead of your home address.
+- Before the first search, Sift asks whether to classify the connection as VPN, Tor, proxy, datacenter, or residential. The check uses [ipquery.io](https://ipquery.io), which also sees your IP. It does not run automatically on page load: open the **Check VPN** pill or the settings panel and choose **Check connection**. The result is stored locally and expires after 30 minutes.
+- If the connection is unprotected, Sift explains the trade-off and lets you continue, acknowledge for 12 hours, or stop. A protected connection unlocks the same sources without the warning.
 - Search history stays in memory only and is discarded on reload.
-- Images load from their original hosts. Those hosts can see your IP address; `no-referrer` prevents them from receiving the page URL.
 - Pinterest import is optional and stays in the browser. The bookmarklet reads Pinterest using your current Pinterest session and hands normalized data to Sift; Sift never receives your Pinterest credentials.
 - Web image capture is optional and runs only when you click the absorber on an image-search tab. It writes displayed links to this browser's buffer; nothing passes through a Sift server.
-- Export your boards as JSON at any time. Erasing site data removes the IndexedDB archive, localStorage mirror, and buffer permanently.
+- Export your boards as JSON at any time. Erasing site data removes the IndexedDB archive, localStorage mirror, buffer, and saved connection result permanently.
 
 ## Image sources
 
-- [Openverse](https://openverse.org) is the primary direct search source.
-- [Wikimedia Commons](https://commons.wikimedia.org) is the direct fallback and second search source.
-- Web image tabs for DuckDuckGo, Brave Search, Qwant, Startpage, Bing Images, Ecosia, and Mojeek are read through the displayed-image-tab absorber.
-- Related images use the saved pin's tags, then Openverse's related-image endpoint when an Openverse image ID is available.
-- Pinterest imports only image URLs and metadata from pins. Sift does not grant rights to those images; check the original pin before reusing one.
+Direct, no-key APIs:
 
-Openverse anonymous API limits apply (currently 20 requests per minute and 200 per day, with a separate thumbnail limit). If Openverse is unavailable or rate-limited, Sift falls back to Wikimedia Commons. Check the license on each original source page before reusing an image.
+- [Openverse](https://openverse.org) — broad openly licensed image search.
+- [Wikimedia Commons](https://commons.wikimedia.org) — open media, plus random discoveries for the Wild mix.
+- [Art Institute of Chicago](https://www.artic.edu) — collection search and IIIF images.
+- [The Met](https://www.metmuseum.org) — collection search and object records.
+- [V&A](https://www.vam.ac.uk) — museum collection search.
+- [Are.na](https://www.are.na) — channels and blocks from a design/art community.
+- [NASA Image Library](https://images.nasa.gov) — spaceflight, earth, and astronomy imagery.
+- [Library of Congress](https://www.loc.gov) — photographs, prints, and historical collections.
+- [Internet Archive](https://archive.org) — book images, ephemera, and archival scans.
+- [Meme Stream](https://meme-api.com) — public meme subreddits for the Current and Memes groups.
+
+Search groups are **Everything**, **Open collections**, **Art museums**, **Current & wild**, **Memes**, and **Archives**. Each group maps to a different subset of the APIs above, so you can widen or narrow the search without changing the query. **Everything** is the broad open/museum/current mix; random memes and text-heavy archive scans stay in their own groups so a keyword search is not diluted by them.
+
+Web image tabs for DuckDuckGo, Bing Images, Google Images, Reddit, Giphy, ArtStation, Are.na, Pinterest, Unsplash, Pexels, and many more are read through the displayed-image-tab absorber. Related images use the saved pin's tags, then Openverse's related-image endpoint when an Openverse image ID is available. Pinterest imports only image URLs and metadata from pins; Sift does not grant rights to those images.
+
+Openverse anonymous API limits apply (currently 20 requests per minute and 200 per day, with a separate thumbnail limit). Museum, archive, and meme APIs have their own limits and may rate-limit or go down; Sift cools a failing source down and keeps mixing the rest. Check the license and rights statement on each original source page before reusing an image.
 
 ## Files
 

@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sift — a private image board</title>
-  <meta name="description" content="Sift is a private, ad-free image board. Search open images, absorb web image tabs, import Pinterest boards, and grow a feed from the tags you keep.">
+  <meta name="description" content="Sift is a private, ad-free image board. Search museums, archives, memes, and the open web; mix a feed from the tags you keep; capture images from anywhere.">
   <meta property="og:type" content="website">
   <meta property="og:title" content="Sift — a private image board">
-  <meta property="og:description" content="Search open images, absorb web image tabs, import Pinterest boards, and grow a feed from the tags you keep.">
+  <meta property="og:description" content="Search museums, archives, memes, and the open web. Mix a feed from the tags you keep, and capture images from anywhere.">
   <meta name="twitter:card" content="summary">
   <meta name="theme-color" content="#f2eee4">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src https://api.openverse.org https://commons.wikimedia.org; base-uri 'self'; form-action 'self'; object-src 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src https://api.openverse.org https://commons.wikimedia.org https://api.artic.edu https://collectionapi.metmuseum.org https://api.vam.ac.uk https://api.are.na https://images-api.nasa.gov https://www.loc.gov https://archive.org https://meme-api.com https://api.ipquery.io; base-uri 'self'; form-action 'self'; object-src 'none'">
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="preload" href="assets/fonts/fraunces-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="assets/fonts/instrument-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
@@ -73,9 +73,9 @@
     </form>
 
     <div class="top-actions">
-      <button class="privacy-pill" id="privacyBtn" type="button" title="How Sift protects your privacy">
+      <button class="privacy-pill" id="privacyBtn" type="button" title="Check your connection before searching">
         <svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>
-        <span>Local only</span>
+        <span>Check VPN</span>
       </button>
       <button class="icon-btn theme-btn" id="themeBtn" type="button" aria-label="Switch to dusk theme" title="Switch theme">
         <svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg>
@@ -305,6 +305,22 @@
     </div>
   </dialog>
 
+  <dialog class="dialog prose-dialog vpn-dialog" id="vpnDialog" aria-labelledby="vpnTitle">
+    <div class="dialog-inner">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">Before Sift reaches out</p>
+          <h2 id="vpnTitle">Check your connection</h2>
+        </div>
+        <button class="icon-btn dialog-close" type="button" data-close aria-label="Close">
+          <svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>
+        </button>
+      </div>
+      <div class="prose" id="vpnBody"></div>
+      <div class="dialog-actions" id="vpnActions"></div>
+    </div>
+  </dialog>
+
   <dialog class="dialog detail-dialog" id="detailDialog" aria-labelledby="detailTitle">
     <div class="dialog-inner detail-inner" id="detailInner"></div>
   </dialog>
@@ -324,16 +340,18 @@
         <p class="lede">Sift has no account system, no analytics, no cookies, and no server of its own. There is nothing to monetize, so there are no ads to serve.</p>
         <ul class="privacy-list">
           <li><strong>Your boards live here.</strong> Names, image links, and a little metadata are stored in this browser's <code>localStorage</code>. No image files are downloaded into your archive, and no data is sent to us.</li>
-          <li><strong>Searches go straight to the source.</strong> Your query is sent directly from your browser to Openverse, with Wikimedia Commons as a fallback. Openverse is run by WordPress; their privacy policy applies to those requests.</li>
+          <li><strong>Searches go straight to the source.</strong> Your query is sent directly from your browser to the open collections, museums, archives, and meme streams you search. Sift has no backend in the middle. Each source's own privacy policy applies to those requests.</li>
+          <li><strong>Every source sees an IP address.</strong> Image hosts and APIs can see the address that asks for a page or a picture, even with <code>no-referrer</code> set. A VPN puts the VPN's address in those logs instead of your home address. Sift works without one, but it is more private with one.</li>
+          <li><strong>The connection check is optional.</strong> Before the first search, Sift can ask <a href="https://ipquery.io" target="_blank" rel="noopener noreferrer">ipquery.io</a> to classify this connection as VPN, Tor, proxy, datacenter, or residential. That lookup also sees your IP, so turn on a VPN first if you want even the check masked. The result stays in this browser and expires after 30 minutes.</li>
           <li><strong>No search history is stored.</strong> Sift keeps the current search in memory only. Reload the page and it is gone.</li>
-          <li><strong>Image hosts see image requests.</strong> This page uses <code>no-referrer</code>, so hosts do not receive the page you came from, but they can still see your IP address when an image loads.</li>
           <li><strong>Pinterest import stays in your browser.</strong> The optional importer is a bookmarklet that runs inside your Pinterest tab, reads the boards your browser session can see, and passes them directly to Sift. Pinterest credentials are never shared with Sift, and nothing passes through a third-party server.</li>
-          <li><strong>Web image capture is deliberate.</strong> Search engines do not allow this static page to read their results. The optional absorber runs only when you click it on an image-search tab, reads the thumbnails already displayed there, and writes their links to this browser's display buffer. It does not read cookies or send anything to a server.</li>
+          <li><strong>Web image capture is deliberate.</strong> Search engines and art sites do not allow this static page to read their results. The optional absorber runs only when you click it on an image-search tab, reads the images already displayed there, and writes their links to this browser's display buffer. It does not read cookies or send anything to a server.</li>
           <li><strong>You own the escape hatch.</strong> Export your boards as JSON at any time. Clearing this site's browser storage removes them permanently.</li>
         </ul>
-        <p class="prose-foot">Openverse and Wikimedia Commons return openly licensed images. Check the license on each original source before reusing an image.</p>
+        <p class="prose-foot">Openverse and Wikimedia Commons return openly licensed images. Museum, archive, and meme sources carry their own rights and licenses; check the original source before reusing an image.</p>
       </div>
       <div class="dialog-actions">
+        <button class="btn btn-quiet" type="button" data-action="vpn-check"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>Check my connection</button>
         <button class="btn btn-primary" type="button" data-close>Understood</button>
       </div>
     </div>
@@ -361,6 +379,17 @@
       </section>
 
       <section class="settings-block">
+        <h3>Connection privacy</h3>
+        <p class="settings-copy" id="vpnInlineStatus">No connection check has run yet.</p>
+        <p class="settings-copy">A VPN keeps your home IP out of the logs of every museum, archive, and image host Sift queries.</p>
+        <div class="settings-actions">
+          <button class="btn btn-quiet" type="button" data-action="vpn-check"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>Check connection</button>
+          <a class="btn btn-quiet" href="https://www.privacyguides.org/en/vpn/" target="_blank" rel="noopener noreferrer">VPN guide</a>
+          <button class="btn btn-quiet" type="button" data-action="privacy">Privacy details</button>
+        </div>
+      </section>
+
+      <section class="settings-block">
         <h3>Your data</h3>
         <p class="settings-copy" id="storageSummary">Boards and links are stored only in this browser.</p>
         <div class="settings-actions">
@@ -374,8 +403,8 @@
 
       <section class="settings-block">
         <h3>Image sources</h3>
-        <p class="settings-copy">Search is powered by <a href="https://openverse.org" target="_blank" rel="noopener noreferrer">Openverse</a>, with <a href="https://commons.wikimedia.org" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a> as a fallback. DuckDuckGo, Brave, Qwant, Startpage, Bing, Ecosia, and Mojeek are read through the displayed-image-tab absorber. Sift is a static page; there is no backend.</p>
-        <p class="settings-copy fine">Sift v1.3 · No analytics, ever.</p>
+        <p class="settings-copy">Search draws directly from <a href="https://openverse.org" target="_blank" rel="noopener noreferrer">Openverse</a>, <a href="https://commons.wikimedia.org" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>, the <a href="https://www.artic.edu" target="_blank" rel="noopener noreferrer">Art Institute of Chicago</a>, <a href="https://www.metmuseum.org" target="_blank" rel="noopener noreferrer">The Met</a>, the <a href="https://www.vam.ac.uk" target="_blank" rel="noopener noreferrer">V&amp;A</a>, <a href="https://www.are.na" target="_blank" rel="noopener noreferrer">Are.na</a>, <a href="https://images.nasa.gov" target="_blank" rel="noopener noreferrer">NASA</a>, the <a href="https://www.loc.gov" target="_blank" rel="noopener noreferrer">Library of Congress</a>, the <a href="https://archive.org" target="_blank" rel="noopener noreferrer">Internet Archive</a>, and a public meme stream. Google, Bing, DuckDuckGo, Yandex, Reddit, Giphy, ArtStation, Unsplash, Pexels, and more are read through the displayed-image-tab absorber. Sift is a static page; there is no backend.</p>
+        <p class="settings-copy fine">Sift v1.4 · No analytics, ever.</p>
       </section>
     </div>
   </dialog>
